@@ -1,0 +1,7 @@
+project_id = "gydixavzcjyodrxsjmxd"
+
+[functions.seed-admin]
+verify_jwt = false
+
+[functions.translate-search]
+verify_jwt = false
