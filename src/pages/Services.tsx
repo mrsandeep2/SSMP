@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef } from "react";
-import { useLocation } from "react-router-dom";
+import { useLocation, useNavigate } from "react-router-dom";
+import { useAuth } from "@/hooks/useAuth";
 import { motion, AnimatePresence } from "framer-motion";
 import Navbar from "@/components/layout/Navbar";
 import "@/styles/services-page.css";
@@ -95,6 +96,8 @@ const fetchServices = async (opts: {
 
 const Services = () => {
   const urlLocation = useLocation();
+  const navigate = useNavigate();
+  const { user } = useAuth();
   const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState("");
   const [activeSearch, setActiveSearch] = useState("");
@@ -395,7 +398,13 @@ const Services = () => {
                   animate={{ opacity: 1, scale: 1 }}
                   exit={{ opacity: 0, scale: 0.9 }}
                   className="glass glass-hover rounded-2xl p-6 cursor-pointer group transition-all service-card"
-                  onClick={() => setBookingService(service)}
+                  onClick={() => {
+                    if (!user) {
+                      navigate("/login", { state: { from: "/services" } });
+                      return;
+                    }
+                    setBookingService(service);
+                  }}
                 >
                   <div className="flex items-center gap-3 mb-3">
                     <div className="relative">
