@@ -1,4 +1,5 @@
 import { useMemo, useState } from "react";
+import { useEffect } from "react";
 import { Button } from "@/components/ui/button";
 import { subscribeUser, unsubscribeUser, getSubscriptionStatus } from "@/lib/pushNotifications";
 
@@ -6,6 +7,8 @@ type StatusTone = "idle" | "success" | "error";
 
 const PushNotificationButton = () => {
   const [loading, setLoading] = useState(false);
+  const [checkingStatus, setCheckingStatus] = useState(true);
+  const [isSubscribed, setIsSubscribed] = useState(false);
   const [statusTone, setStatusTone] = useState<StatusTone>("idle");
   const [statusMessage, setStatusMessage] = useState("");
 
@@ -14,6 +17,22 @@ const PushNotificationButton = () => {
     if (statusTone === "error") return "text-destructive";
     return "text-muted-foreground";
   }, [statusTone]);
+
+  useEffect(() => {
+    const checkCurrentStatus = async () => {
+      setCheckingStatus(true);
+      try {
+        const status = await getSubscriptionStatus();
+        setIsSubscribed(Boolean(status.isSubscribed));
+      } catch {
+        setIsSubscribed(false);
+      } finally {
+        setCheckingStatus(false);
+      }
+    };
+
+    void checkCurrentStatus();
+  }, []);
 
   const handleEnable = async () => {
     setLoading(true);
@@ -28,21 +47,13 @@ const PushNotificationButton = () => {
         return;
       }
 
-      if (result.message.toLowerCase().includes("native push")) {
-        setStatusTone("success");
-        setStatusMessage(result.message);
-        return;
-      }
-
       const status = await getSubscriptionStatus();
       if (status.isSubscribed) {
-        setStatusTone("success");
-        setStatusMessage(
-          result.mode === "already-subscribed"
-            ? "Notifications are already enabled on this browser."
-            : "Notifications enabled successfully."
-        );
+        setIsSubscribed(true);
+        setStatusTone("idle");
+        setStatusMessage("");
       } else {
+        setIsSubscribed(false);
         setStatusTone("error");
         setStatusMessage("Subscription could not be verified. Please retry.");
       }
@@ -66,8 +77,9 @@ const PushNotificationButton = () => {
         setStatusMessage(result.message || "Unable to disable notifications.");
         return;
       }
-      setStatusTone("success");
-      setStatusMessage("Notifications disabled on this browser.");
+      setIsSubscribed(false);
+      setStatusTone("idle");
+      setStatusMessage("");
     } catch (error: any) {
       setStatusTone("error");
       setStatusMessage(error?.message || "Something went wrong while disabling notifications.");
@@ -81,15 +93,26 @@ const PushNotificationButton = () => {
       <div className="flex flex-col gap-2 md:flex-row md:items-center md:justify-between">
         <div>
           <p className="text-sm font-medium text-foreground">Web Push Notifications</p>
-          <p className="text-xs text-muted-foreground">Receive real-time updates even when the app tab is closed.</p>
+          <p className="text-xs text-muted-foreground">
+            {isSubscribed
+              ? "Notifications are enabled for this device."
+              : "Receive real-time updates even when the app tab is closed."}
+          </p>
         </div>
         <div className="flex items-center gap-2">
-          <Button onClick={handleEnable} disabled={loading} size="sm" variant="hero">
-            {loading ? "Enabling..." : "Enable Notifications"}
-          </Button>
-          <Button onClick={handleDisable} disabled={loading} size="sm" variant="outline">
-            Disable
-          </Button>
+          {checkingStatus ? (
+            <Button disabled size="sm" variant="outline">
+              Checking...
+            </Button>
+          ) : isSubscribed ? (
+            <Button onClick={handleDisable} disabled={loading} size="sm" variant="outline">
+              {loading ? "Disabling..." : "Disable Notifications"}
+            </Button>
+          ) : (
+            <Button onClick={handleEnable} disabled={loading} size="sm" variant="hero">
+              {loading ? "Enabling..." : "Enable Notifications"}
+            </Button>
+          )}
         </div>
       </div>
       {statusMessage && <p className={`mt-3 text-sm ${statusClassName}`}>{statusMessage}</p>}

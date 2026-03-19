@@ -27,8 +27,54 @@ const getMedianBridge = () => {
   return w.median?.onesignal || w.gonative?.onesignal || null;
 };
 
+const getPushSupportDiagnostics = () => {
+  const hasServiceWorker = typeof navigator !== "undefined" && "serviceWorker" in navigator;
+  const hasPushManager = typeof window !== "undefined" && "PushManager" in window;
+  const hasNotification = typeof window !== "undefined" && "Notification" in window;
+  const isSecure = typeof window !== "undefined" ? Boolean(window.isSecureContext) : false;
+  const protocol = typeof window !== "undefined" ? window.location.protocol : "";
+  const host = typeof window !== "undefined" ? window.location.hostname : "";
+  const isLocalhost = host === "localhost" || host === "127.0.0.1";
+
+  return {
+    hasServiceWorker,
+    hasPushManager,
+    hasNotification,
+    isSecure,
+    protocol,
+    isLocalhost,
+  };
+};
+
+const getUnsupportedPushMessage = (hasMedianBridge: boolean) => {
+  const d = getPushSupportDiagnostics();
+
+  if (!d.isSecure && !d.isLocalhost) {
+    return "Push requires HTTPS. Open this app on an HTTPS URL (or localhost for local testing).";
+  }
+
+  if (!d.hasServiceWorker) {
+    return "This browser/runtime does not support Service Worker, so web push cannot work here.";
+  }
+
+  if (!d.hasPushManager) {
+    return "This browser/runtime does not support PushManager. Use Chrome/Edge on HTTPS, or enable OneSignal plugin in Median App Studio.";
+  }
+
+  if (!d.hasNotification) {
+    return "This browser/runtime does not support Notification API.";
+  }
+
+  if (!hasMedianBridge) {
+    return "Push is not supported in this environment. If this is Median, enable OneSignal plugin and rebuild app so native bridge is injected.";
+  }
+
+  return "Push is not supported in this environment.";
+};
+
 const hasWebPushSupport = () => {
-  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+  const d = getPushSupportDiagnostics();
+  return d.hasServiceWorker && d.hasPushManager && d.hasNotification && (d.isSecure || d.isLocalhost);
 };
 
 const getMedianOneSignalInfo = async (bridge: any) => {
@@ -239,7 +285,7 @@ export const subscribeUser = async (): Promise<PushActionResult> => {
   if (!hasWebPushSupport()) {
     return {
       ok: false,
-      message: "Push is not supported in this environment. In Median app, enable OneSignal plugin in App Studio.",
+      message: getUnsupportedPushMessage(Boolean(bridge)),
     };
   }
 
@@ -344,7 +390,7 @@ export const unsubscribeUser = async (): Promise<PushActionResult> => {
   }
 
   if (!hasWebPushSupport()) {
-    return { ok: false, message: "Push is not supported in this environment." };
+    return { ok: false, message: getUnsupportedPushMessage(Boolean(bridge)) };
   }
 
   const registration = await registerServiceWorker();
