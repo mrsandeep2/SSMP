@@ -17,6 +17,9 @@ type PushEventPayload = {
   event_type: "booking_created" | "booking_status_updated" | "booking_payment_requested";
   booking: BookingRecord;
   old_booking?: BookingRecord | null;
+  from_status?: string | null;
+  to_status?: string | null;
+  trigger_actor_id?: string | null;
 };
 
 type PushTarget = {
@@ -39,6 +42,8 @@ const sanitizeStatus = (status: string | null | undefined) => {
   return status;
 };
 
+const statusLabel = (status: string | null | undefined) => sanitizeStatus(status).replace(/_/g, " ");
+
 const buildTarget = (payload: PushEventPayload): PushTarget | null => {
   const booking = payload.booking;
   const status = sanitizeStatus(booking.status);
@@ -53,14 +58,22 @@ const buildTarget = (payload: PushEventPayload): PushTarget | null => {
     };
   }
 
-  if (payload.event_type === "booking_status_updated" && ["accepted", "on_the_way"].includes(status)) {
+  if (
+    payload.event_type === "booking_status_updated" &&
+    payload.trigger_actor_id === booking.provider_id &&
+    payload.old_booking?.status !== booking.status
+  ) {
+    const fromStatus = statusLabel(payload.from_status ?? payload.old_booking?.status);
+    const toStatus = statusLabel(payload.to_status ?? booking.status);
+    const title =
+      status === "accepted"
+        ? "Booking accepted"
+        : `Booking status updated: ${toStatus}`;
+
     return {
       userId: booking.seeker_id,
-      title: status === "accepted" ? "Booking accepted" : "Provider is on the way",
-      body:
-        status === "accepted"
-          ? "Your provider accepted the booking. Open dashboard for progress."
-          : "Your provider started travel. Open dashboard to track live location.",
+      title,
+      body: `Provider changed booking status from ${fromStatus} to ${toStatus}. Open dashboard for details.`,
       tag: `seeker-booking-status-${booking.id}-${status}`,
       url: "/dashboard/seeker",
     };
@@ -155,6 +168,7 @@ Deno.serve(async (req) => {
       tag: target.tag,
       url: target.url,
       requireInteraction: true,
+      renotify: true,
       vibrate: [250, 120, 250],
     });
 

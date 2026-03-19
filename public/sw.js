@@ -16,7 +16,10 @@ self.addEventListener("push", (event) => {
     body: payload.body || "Open the app to view details.",
     tag: payload.tag,
     requireInteraction: payload.requireInteraction ?? true,
+    renotify: payload.renotify ?? true,
     vibrate: payload.vibrate || [250, 120, 250],
+    badge: payload.badge || "/favicon.ico",
+    icon: payload.icon || "/favicon.ico",
     data: {
       url: payload.url || "/",
     },
