@@ -116,6 +116,11 @@ const isMissingSubscriptionColumnError = (error: any) => {
   return msg.includes("could not find") && msg.includes("subscription") && msg.includes("push_subscriptions");
 };
 
+const isRlsPolicyError = (error: any) => {
+  const msg = String(error?.message || "").toLowerCase();
+  return msg.includes("row-level security policy") || msg.includes("violates row-level security");
+};
+
 const writePushSubscription = async (existingId: string | null, payload: Record<string, any>) => {
   const firstOp = existingId
     ? supabase.from("push_subscriptions" as any).update(payload).eq("id", existingId)
@@ -123,6 +128,17 @@ const writePushSubscription = async (existingId: string | null, payload: Record<
 
   const first = await firstOp;
   if (!first.error) return { error: null };
+
+  if (isRlsPolicyError(first.error)) {
+    const rpc = await supabase.rpc("register_push_subscription" as any, {
+      p_endpoint: payload.endpoint,
+      p_p256dh: payload.p256dh,
+      p_auth: payload.auth,
+      p_user_agent: payload.user_agent,
+    } as any);
+
+    return { error: rpc.error };
+  }
 
   if (!isMissingSubscriptionColumnError(first.error)) {
     return { error: first.error };
@@ -134,6 +150,17 @@ const writePushSubscription = async (existingId: string | null, payload: Record<
     : supabase.from("push_subscriptions" as any).insert(fallbackPayload);
 
   const retry = await retryOp;
+  if (retry.error && isRlsPolicyError(retry.error)) {
+    const rpc = await supabase.rpc("register_push_subscription" as any, {
+      p_endpoint: payload.endpoint,
+      p_p256dh: payload.p256dh,
+      p_auth: payload.auth,
+      p_user_agent: payload.user_agent,
+    } as any);
+
+    return { error: rpc.error };
+  }
+
   return { error: retry.error };
 };
 
