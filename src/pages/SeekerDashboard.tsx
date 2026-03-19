@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import "@/styles/seeker-dashboard.css";
@@ -13,6 +13,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
+import { requestNotificationPermissionIfNeeded, triggerHardNotification } from "@/lib/hardNotifications";
+import { registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/20 text-warning",
@@ -22,6 +24,20 @@ const statusColors: Record<string, string> = {
   started: "bg-info/20 text-info",
   completed: "bg-success/20 text-success",
   cancelled: "bg-destructive/20 text-destructive",
+};
+
+const paymentBadgeClass = (paymentStatus: string) => {
+  if (paymentStatus === "paid") return "bg-success/20 text-success";
+  if (paymentStatus === "requested") return "bg-info/20 text-info";
+  if (paymentStatus === "rejected") return "bg-destructive/20 text-destructive";
+  return "bg-warning/20 text-warning";
+};
+
+const paymentLabel = (paymentStatus: string) => {
+  if (paymentStatus === "paid") return "Paid";
+  if (paymentStatus === "requested") return "Requested";
+  if (paymentStatus === "rejected") return "Rejected";
+  return "Unpaid";
 };
 
 const normalizeStatus = (status: string) => {
@@ -52,14 +68,25 @@ const SeekerDashboard = () => {
   const [editAvatar, setEditAvatar] = useState("");
   const [cancellingBookingId, setCancellingBookingId] = useState<string | null>(null);
   const [disputingBookingId, setDisputingBookingId] = useState<string | null>(null);
+  const [payingBookingId, setPayingBookingId] = useState<string | null>(null);
   const [reviewingBookingId, setReviewingBookingId] = useState<string | null>(null);
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
+  const handledRealtimeAlertKeysRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!loading && !user) navigate("/login");
   }, [user, loading, navigate]);
+
+  useEffect(() => {
+    if (!user) return;
+    void requestNotificationPermissionIfNeeded().then((permission) => {
+      if (permission === "granted") {
+        void registerBackgroundPushForCurrentUser();
+      }
+    });
+  }, [user?.id]);
 
   const { data: profile } = useQuery({
     queryKey: ["seeker-profile", user?.id],
@@ -174,11 +201,47 @@ const SeekerDashboard = () => {
           if (payload.eventType === "UPDATE") {
             const previousStatus = normalizeStatus(payload.old?.status || "");
             const nextStatus = normalizeStatus(payload.new?.status || "");
+            const previousPayment = payload.old?.payment_status || "unpaid";
+            const nextPayment = payload.new?.payment_status || "unpaid";
+
             if (previousStatus && nextStatus && previousStatus !== nextStatus) {
               toast({
                 title: "Booking status updated",
                 description: `Your booking is now ${statusLabel(nextStatus)}.`,
               });
+
+              if (["accepted", "on_the_way"].includes(nextStatus)) {
+                const statusAlertKey = `${payload.new?.id}:${nextStatus}`;
+                if (!handledRealtimeAlertKeysRef.current.has(statusAlertKey)) {
+                  handledRealtimeAlertKeysRef.current.add(statusAlertKey);
+                  void triggerHardNotification({
+                    title: nextStatus === "accepted" ? "Provider accepted your booking" : "Provider is on the way",
+                    body:
+                      nextStatus === "accepted"
+                        ? "Your booking has been accepted. Open dashboard for live progress."
+                        : "Your provider started travel. Check live tracking now.",
+                    tag: `seeker-booking-status-${payload.new?.id}-${nextStatus}`,
+                    requireInteraction: true,
+                  });
+                }
+              }
+            }
+
+            if (previousPayment !== nextPayment && nextPayment === "requested") {
+              const paymentAlertKey = `${payload.new?.id}:payment-requested`;
+              if (!handledRealtimeAlertKeysRef.current.has(paymentAlertKey)) {
+                handledRealtimeAlertKeysRef.current.add(paymentAlertKey);
+                toast({
+                  title: "Payment requested",
+                  description: "Your provider requested payment confirmation.",
+                });
+                void triggerHardNotification({
+                  title: "Payment requested",
+                  body: "Provider requested payment. Open dashboard to confirm or reject.",
+                  tag: `seeker-payment-request-${payload.new?.id}`,
+                  requireInteraction: true,
+                });
+              }
             }
           }
           queryClient.invalidateQueries({ queryKey: ["my-bookings", user.id] });
@@ -298,6 +361,37 @@ const SeekerDashboard = () => {
       title: "Dispute raised",
       description: "Admin will review your booking dispute.",
     });
+    queryClient.invalidateQueries({ queryKey: ["my-bookings", user.id] });
+  };
+
+  const requestPayment = async (bookingId: string, status: string, method: string) => {
+    const normalizedStatus = normalizeStatus(status);
+    if (!["started", "arrived"].includes(normalizedStatus)) {
+      toast({
+        title: "Payment not available",
+        description: "You can pay once provider has arrived or started service.",
+        variant: "destructive",
+      });
+      return;
+    }
+
+    if (!user) return;
+    setPayingBookingId(bookingId);
+
+    const { error } = await supabase
+      .from("bookings")
+      .update({ payment_status: "requested", payment_method: method } as any)
+      .eq("id", bookingId)
+      .eq("seeker_id", user.id);
+
+    setPayingBookingId(null);
+
+    if (error) {
+      toast({ title: "Payment update failed", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({ title: "Payment requested", description: "Provider will now confirm payment receipt." });
     queryClient.invalidateQueries({ queryKey: ["my-bookings", user.id] });
   };
 
@@ -462,6 +556,9 @@ const SeekerDashboard = () => {
                         <span className={`text-xs px-3 py-1 rounded-full font-medium capitalize ${statusColors[normalizedStatus] || ""}`}>
                           {statusLabel(normalizedStatus)}
                         </span>
+                        <span className={`text-xs px-3 py-1 rounded-full font-medium ${paymentBadgeClass(order.payment_status || "unpaid")}`}>
+                          Payment: {paymentLabel(order.payment_status || "unpaid")}
+                        </span>
                         {(normalizedStatus === "pending" || normalizedStatus === "accepted") && (
                           <Button
                             size="sm"
@@ -483,6 +580,26 @@ const SeekerDashboard = () => {
                           >
                             {disputingBookingId === order.id ? "Submitting..." : "Raise Dispute"}
                           </Button>
+                        )}
+                        {(order.payment_status === "unpaid" || order.payment_status === "rejected" || !order.payment_status) && (normalizedStatus === "arrived" || normalizedStatus === "started") && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="hero"
+                              disabled={payingBookingId === order.id}
+                              onClick={() => requestPayment(order.id, order.status, "upi")}
+                            >
+                              {payingBookingId === order.id ? "Processing..." : "Pay by UPI"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={payingBookingId === order.id}
+                              onClick={() => requestPayment(order.id, order.status, "cash")}
+                            >
+                              Cash
+                            </Button>
+                          </div>
                         )}
                         {normalizedStatus === "completed" && !reviewedSet.has(order.id) && (
                           <Button

@@ -16,6 +16,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { serviceCategories } from "@/data/marketplace";
 import ProviderNavigationMap from "@/components/tracking/ProviderNavigationMap";
+import { getNotificationPermissionState, requestNotificationPermissionIfNeeded, triggerHardNotification } from "@/lib/hardNotifications";
+import { registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -36,6 +38,20 @@ const statusBadgeClass = (status: string) => {
   return "bg-info/20 text-info";
 };
 
+const paymentBadgeClass = (paymentStatus: string) => {
+  if (paymentStatus === "paid") return "bg-success/20 text-success";
+  if (paymentStatus === "requested") return "bg-info/20 text-info";
+  if (paymentStatus === "rejected") return "bg-destructive/20 text-destructive";
+  return "bg-warning/20 text-warning";
+};
+
+const paymentLabel = (paymentStatus: string) => {
+  if (paymentStatus === "paid") return "Paid";
+  if (paymentStatus === "requested") return "Requested";
+  if (paymentStatus === "rejected") return "Rejected";
+  return "Unpaid";
+};
+
 const nextStatusLabel: Record<string, string> = {
   on_the_way: "Mark On The Way",
   arrived: "Mark Arrived",
@@ -52,6 +68,14 @@ const canMoveToStatus = (currentStatus: string, targetStatus: string) => {
   return currentIndex >= 0 && targetIndex === currentIndex + 1;
 };
 
+type UrgentProviderAlert = {
+  bookingId: string;
+  amount: number;
+  scheduledDate: string | null;
+  scheduledTime: string | null;
+  createdAt: string;
+};
+
 const ProviderDashboard = () => {
   const { user, loading } = useAuth();
   const { toast } = useToast();
@@ -65,6 +89,9 @@ const ProviderDashboard = () => {
   const [delayTime, setDelayTime] = useState<string>("");
   const [delayMessage, setDelayMessage] = useState<string>("");
   const [updatingBookingId, setUpdatingBookingId] = useState<string | null>(null);
+  const [paymentUpdatingBookingId, setPaymentUpdatingBookingId] = useState<string | null>(null);
+  const [urgentAlerts, setUrgentAlerts] = useState<UrgentProviderAlert[]>([]);
+  const [notificationPermission, setNotificationPermission] = useState<"default" | "granted" | "denied" | "unsupported">("default");
   const [newService, setNewService] = useState({
     title: "",
     description: "",
@@ -74,10 +101,35 @@ const ProviderDashboard = () => {
   });
   const [editName, setEditName] = useState("");
   const locationWatchRef = useRef<number | null>(null);
+  const alertedBookingIdsRef = useRef<Set<string>>(new Set());
 
   useEffect(() => {
     if (!loading && !user) navigate("/login");
   }, [user, loading, navigate]);
+
+  useEffect(() => {
+    setNotificationPermission(getNotificationPermissionState());
+  }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    void requestNotificationPermissionIfNeeded().then((permission) => {
+      setNotificationPermission(permission as "default" | "granted" | "denied" | "unsupported");
+      if (permission === "granted") {
+        void registerBackgroundPushForCurrentUser();
+      }
+    });
+  }, [user?.id]);
+
+  useEffect(() => {
+    const refreshPermission = () => setNotificationPermission(getNotificationPermissionState());
+    window.addEventListener("focus", refreshPermission);
+    document.addEventListener("visibilitychange", refreshPermission);
+    return () => {
+      window.removeEventListener("focus", refreshPermission);
+      document.removeEventListener("visibilitychange", refreshPermission);
+    };
+  }, []);
 
   // Cleanup GPS watch on unmount
   useEffect(() => {
@@ -132,6 +184,26 @@ const ProviderDashboard = () => {
       .on("postgres_changes", { event: "*", schema: "public", table: "bookings", filter: `provider_id=eq.${user.id}` }, (payload: any) => {
         console.log("📲 Booking for provider updated:", payload);
         if (payload.eventType === "INSERT") {
+          const bookingId = payload.new?.id as string | undefined;
+          if (bookingId && !alertedBookingIdsRef.current.has(bookingId)) {
+            alertedBookingIdsRef.current.add(bookingId);
+            const newAlert: UrgentProviderAlert = {
+              bookingId,
+              amount: Number(payload.new?.amount ?? 0),
+              scheduledDate: payload.new?.scheduled_date ?? null,
+              scheduledTime: payload.new?.scheduled_time ?? null,
+              createdAt: payload.new?.created_at ?? new Date().toISOString(),
+            };
+            setUrgentAlerts((prev) => [newAlert, ...prev].slice(0, 5));
+
+            void triggerHardNotification({
+              title: "New service hit",
+              body: `Booking request received${newAlert.scheduledTime ? ` for ${newAlert.scheduledTime}` : ""}. Open Provider Hub now.`,
+              tag: `provider-booking-${bookingId}`,
+              requireInteraction: true,
+            });
+          }
+
           toast({
             title: "New booking request",
             description: "A seeker has requested your service.",
@@ -167,7 +239,49 @@ const ProviderDashboard = () => {
       supabase.removeChannel(ch2);
       supabase.removeChannel(ch3);
     };
-  }, [user?.id, queryClient]);
+  }, [user?.id, queryClient, toast]);
+
+  const dismissUrgentAlert = (bookingId: string) => {
+    setUrgentAlerts((prev) => prev.filter((alert) => alert.bookingId !== bookingId));
+  };
+
+  const dismissAllUrgentAlerts = () => {
+    setUrgentAlerts([]);
+  };
+
+  const enableNotifications = async () => {
+    const permission = await requestNotificationPermissionIfNeeded();
+    setNotificationPermission(permission as "default" | "granted" | "denied" | "unsupported");
+
+    if (permission === "granted") {
+      await registerBackgroundPushForCurrentUser();
+      toast({
+        title: "Notifications enabled",
+        description: "You will now receive hard alerts for incoming service requests.",
+      });
+      return;
+    }
+
+    if (permission === "denied") {
+      toast({
+        title: "Notifications blocked",
+        description: "Enable notifications in your browser site settings, then return and click Check again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const checkNotificationPermission = () => {
+    const permission = getNotificationPermissionState();
+    setNotificationPermission(permission);
+    if (permission === "granted") {
+      void registerBackgroundPushForCurrentUser();
+      toast({
+        title: "Notifications active",
+        description: "Hard alerts are now available in this tab.",
+      });
+    }
+  };
 
   const { data: profile } = useQuery({
     queryKey: ["provider-profile", user?.id],
@@ -295,6 +409,47 @@ const ProviderDashboard = () => {
     }
   };
 
+  const respondPaymentRequest = async (booking: any, accept: boolean) => {
+    if (!user) return;
+    setPaymentUpdatingBookingId(booking.id);
+
+    const payload: Record<string, any> = {
+      payment_status: accept ? "paid" : "rejected",
+    };
+
+    if (accept) {
+      const commissionRate = 15;
+      const platform = parseFloat((Number(booking.amount) * (commissionRate / 100)).toFixed(2));
+      payload.commission_rate = commissionRate;
+      payload.platform_earnings = platform;
+      payload.provider_earnings = parseFloat((Number(booking.amount) - platform).toFixed(2));
+    }
+
+    const { error } = await supabase
+      .from("bookings")
+      .update(payload)
+      .eq("id", booking.id)
+      .eq("provider_id", user.id);
+
+    setPaymentUpdatingBookingId(null);
+
+    if (error) {
+      toast({ title: "Payment update failed", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({
+      title: accept ? "Payment accepted" : "Payment rejected",
+      description: accept
+        ? "Payment confirmed. You can complete after finishing service."
+        : "Seeker can retry payment request.",
+    });
+
+    await queryClient.invalidateQueries({ queryKey: ["provider-bookings", user.id] });
+    queryClient.invalidateQueries({ predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "my-bookings" });
+    queryClient.invalidateQueries({ queryKey: ["admin-bookings"] });
+  };
+
   // Extended update: allow additional fields (notes, scheduled_date, scheduled_time)
   const updateBookingExtended = async (id: string, payload: Record<string, any>) => {
     // Optimistic update for status and scheduling fields
@@ -413,6 +568,63 @@ const ProviderDashboard = () => {
             </div>
           </div>
 
+          {notificationPermission !== "granted" && (
+            <div className="mb-6 rounded-2xl border border-warning/40 bg-warning/10 p-4 md:p-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Enable hard notifications</p>
+                  <p className="text-sm text-muted-foreground">
+                    {notificationPermission === "denied"
+                      ? "Browser notifications are blocked. Allow them in site settings, then click Check again."
+                      : notificationPermission === "unsupported"
+                        ? "This browser does not support system notifications."
+                        : "Allow notifications to receive sound + system popup for new service hits."}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {notificationPermission !== "unsupported" && notificationPermission !== "denied" && (
+                    <Button variant="hero" size="sm" onClick={enableNotifications}>Enable notifications</Button>
+                  )}
+                  {notificationPermission !== "unsupported" && (
+                    <Button variant="outline" size="sm" onClick={checkNotificationPermission}>Check again</Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {urgentAlerts.length > 0 && (
+            <div className="mb-6 rounded-2xl border border-destructive/40 bg-destructive/10 p-4 md:p-5">
+              <div className="flex flex-col gap-4 md:flex-row md:items-start md:justify-between">
+                <div>
+                  <p className="text-sm uppercase tracking-wide text-destructive/90">High Priority</p>
+                  <h3 className="text-lg font-semibold text-foreground">New service request requires action</h3>
+                  <p className="text-sm text-muted-foreground">Hard alert triggered for {urgentAlerts.length} incoming booking{urgentAlerts.length > 1 ? "s" : ""}.</p>
+                </div>
+                <Button variant="outline" size="sm" className="w-full md:w-auto" onClick={dismissAllUrgentAlerts}>
+                  Dismiss all
+                </Button>
+              </div>
+              <div className="mt-4 space-y-2">
+                {urgentAlerts.map((alert) => (
+                  <div key={alert.bookingId} className="flex flex-col gap-2 rounded-xl border border-destructive/30 bg-background/60 p-3 md:flex-row md:items-center md:justify-between">
+                    <div className="text-sm">
+                      <p className="font-medium text-foreground">Booking #{alert.bookingId.slice(0, 8)}</p>
+                      <p className="text-muted-foreground">
+                        ₹{alert.amount} {alert.scheduledDate ? `• ${alert.scheduledDate}` : ""} {alert.scheduledTime ? `• ${alert.scheduledTime}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex gap-2">
+                      <Button size="sm" variant="hero" onClick={() => dismissUrgentAlert(alert.bookingId)}>
+                        Mark seen
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Stats */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             {[
@@ -459,6 +671,29 @@ const ProviderDashboard = () => {
                       </div>
                       <div className="flex items-center gap-3 flex-wrap justify-end">
                         <span className="font-display font-semibold text-foreground">₹{b.amount}</span>
+                        <span className={`text-xs px-3 py-1 rounded-full font-medium ${paymentBadgeClass(b.payment_status || "unpaid")}`}>
+                          Payment: {paymentLabel(b.payment_status || "unpaid")}
+                        </span>
+                        {(b.payment_status || "unpaid") === "requested" && (
+                          <div className="flex items-center gap-2">
+                            <Button
+                              size="sm"
+                              variant="hero"
+                              disabled={paymentUpdatingBookingId === b.id}
+                              onClick={() => respondPaymentRequest(b, true)}
+                            >
+                              {paymentUpdatingBookingId === b.id ? "Updating..." : "Accept Payment"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={paymentUpdatingBookingId === b.id}
+                              onClick={() => respondPaymentRequest(b, false)}
+                            >
+                              Reject Payment
+                            </Button>
+                          </div>
+                        )}
                         {normalizeStatus(b.status) === "pending" ? (
                           <div className="flex gap-2">
                             <Button
@@ -492,7 +727,12 @@ const ProviderDashboard = () => {
                                     key={`${b.id}-${targetStatus}`}
                                     size="sm"
                                     variant="outline"
-                                    disabled={updatingBookingId === b.id || !canMoveToStatus(b.status, targetStatus)}
+                                    disabled={
+                                      updatingBookingId === b.id ||
+                                      !canMoveToStatus(b.status, targetStatus) ||
+                                      (targetStatus === "completed" && b.payment_status !== "paid")
+                                    }
+                                    title={targetStatus === "completed" && b.payment_status !== "paid" ? "Waiting for seeker payment" : undefined}
                                     onClick={() => updateBooking(b.id, targetStatus)}
                                   >
                                     {nextStatusLabel[targetStatus]}

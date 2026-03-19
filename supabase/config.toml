@@ -5,3 +5,6 @@ verify_jwt = false
 
 [functions.translate-search]
 verify_jwt = false
+
+[functions.send-web-push]
+verify_jwt = false

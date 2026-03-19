@@ -15,6 +15,7 @@ const Navbar = () => {
   };
 
   const dashboardPath = role === "provider" ? "/dashboard/provider" : role === "admin" ? "/dashboard/admin" : "/dashboard/seeker";
+  const dashboardLabel = role === "provider" || role === "admin" ? "Dashboard" : "Profile";
 
   return (
     <nav className="fixed top-0 left-0 right-0 z-50 glass border-b border-white/10 backdrop-blur-xl">
@@ -30,7 +31,7 @@ const Navbar = () => {
           <Link to="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Home</Link>
           <Link to="/#categories" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Services</Link>
           {user && (
-            <Link to={dashboardPath} className="text-sm text-muted-foreground hover:text-foreground transition-colors">Dashboard</Link>
+            <Link to={dashboardPath} className="text-sm text-muted-foreground hover:text-foreground transition-colors">{dashboardLabel}</Link>
           )}
         </div>
 
@@ -65,7 +66,7 @@ const Navbar = () => {
           <Link to="/#categories" className="block text-sm text-muted-foreground hover:text-foreground" onClick={() => setOpen(false)}>Services</Link>
           {user ? (
             <>
-              <Link to={dashboardPath} className="block text-sm text-muted-foreground hover:text-foreground" onClick={() => setOpen(false)}>Dashboard</Link>
+              <Link to={dashboardPath} className="block text-sm text-muted-foreground hover:text-foreground" onClick={() => setOpen(false)}>{dashboardLabel}</Link>
               <Button variant="ghost" size="sm" onClick={() => { handleSignOut(); setOpen(false); }}>Sign Out</Button>
             </>
           ) : (

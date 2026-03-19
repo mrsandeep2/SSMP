@@ -42,6 +42,8 @@ export default function AdminDashboard() {
   const [activeTab, setActiveTab] = useState("overview");
   const [showAddService, setShowAddService] = useState(false);
   const [editingService, setEditingService] = useState<any | null>(null);
+  const [updatingBookingId, setUpdatingBookingId] = useState<string | null>(null);
+  const [bookingStatusDrafts, setBookingStatusDrafts] = useState<Record<string, string>>({});
   const [editFields, setEditFields] = useState({
     title: "",
     description: "",
@@ -161,10 +163,14 @@ export default function AdminDashboard() {
     }
   });
 
-  const { data: bookings = [] } = useQuery({
+  const { data: bookings = [], error: bookingsError } = useQuery({
     queryKey: ["admin-bookings"],
     queryFn: async () => {
-      const { data } = await supabase.from("bookings").select("*");
+      const { data, error } = await supabase
+        .from("bookings")
+        .select("*")
+        .order("created_at", { ascending: false });
+      if (error) throw error;
       return data || [];
     }
   });
@@ -180,6 +186,15 @@ export default function AdminDashboard() {
       return data ?? [];
     },
   });
+
+  useEffect(() => {
+    if (!bookingsError) return;
+    toast({
+      title: "Bookings load failed",
+      description: (bookingsError as any).message || "Could not fetch bookings for admin.",
+      variant: "destructive",
+    });
+  }, [bookingsError, toast]);
 
   /* =========================================================
      CALCULATIONS
@@ -221,8 +236,59 @@ export default function AdminDashboard() {
   ).length;
 
   const platformRevenue = bookings
-    .filter((b: any) => b.status === "completed")
+    .filter((b: any) => (b as any).payment_status === "paid")
     .reduce((sum: number, b: any) => sum + Number((b as any).platform_earnings ?? Number(b.amount) * 0.15), 0);
+
+  const lifecycleOrder = ["pending", "accepted", "on_the_way", "arrived", "started", "completed"];
+  const allAdminStatuses = ["pending", "accepted", "on_the_way", "arrived", "started", "completed", "cancelled", "disputed"];
+
+  const normalizeStatus = (status: string) => {
+    if (status === "confirmed") return "accepted";
+    if (status === "in_progress") return "started";
+    return status;
+  };
+
+  const getStatusClass = (status: string) => {
+    const normalized = normalizeStatus(status);
+    if (normalized === "completed") return "bg-success/20 text-success";
+    if (normalized === "cancelled" || normalized === "disputed") return "bg-destructive/20 text-destructive";
+    if (normalized === "pending") return "bg-warning/20 text-warning";
+    return "bg-info/20 text-info";
+  };
+
+  const stageIndex = (status: string) => lifecycleOrder.indexOf(normalizeStatus(status));
+
+  const getUserDisplayName = (id: string) => {
+    const u = users.find((x: any) => x.id === id);
+    if (!u) return `${id?.slice(0, 8)}...`;
+    return u.name || u.email || `${id?.slice(0, 8)}...`;
+  };
+
+  const getServiceTitle = (serviceId: string) => {
+    const s = services.find((x: any) => x.id === serviceId);
+    return s?.title || `Service ${String(serviceId).slice(0, 8)}...`;
+  };
+
+  const handleAdminBookingStatusChange = async (booking: any) => {
+    const nextStatus = bookingStatusDrafts[booking.id] || booking.status;
+    if (nextStatus === booking.status) return;
+
+    setUpdatingBookingId(booking.id);
+    const { error } = await supabase
+      .from("bookings")
+      .update({ status: nextStatus } as any)
+      .eq("id", booking.id);
+    setUpdatingBookingId(null);
+
+    if (error) {
+      toast({ title: "Status update failed", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({ title: "Booking status changed", description: `Updated to ${nextStatus.replace(/_/g, " ")}` });
+    queryClient.invalidateQueries({ queryKey: ["admin-bookings"] });
+    queryClient.invalidateQueries({ queryKey: ["admin-booking-events"] });
+  };
 
   const openEditService = (service: any) => {
     setEditingService(service);
@@ -594,6 +660,93 @@ const handleApproveService = async (id: string) => {
     </div>
   );
 
+  const renderBookings = () => (
+    <div className="glass p-6">
+      <div className="flex items-center justify-between mb-4">
+        <h2 className="text-lg font-semibold">All Booking Tracking</h2>
+        <span className="text-xs text-muted-foreground">Admin can force-change status for complaint handling</span>
+      </div>
+
+      {bookings.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No bookings available.</p>
+      ) : (
+        <div className="space-y-4 max-h-[680px] overflow-y-auto pr-1">
+          {(bookings as any[]).map((b: any) => {
+            const current = normalizeStatus(b.status);
+            const currentStageIndex = stageIndex(b.status);
+            const draftStatus = bookingStatusDrafts[b.id] || b.status;
+            return (
+              <div key={b.id} className="rounded-xl border border-border/40 bg-secondary/30 p-4">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <div className="font-semibold text-foreground">{getServiceTitle(b.service_id)}</div>
+                    <div className="text-xs text-muted-foreground mt-1">
+                      Seeker: {getUserDisplayName(b.seeker_id)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Provider: {getUserDisplayName(b.provider_id)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      {b.scheduled_date || "No date"} {b.scheduled_time ? `· ${b.scheduled_time}` : ""}
+                    </div>
+                  </div>
+
+                  <div className="flex items-center gap-2 flex-wrap justify-end">
+                    <span className={`text-xs px-3 py-1 rounded-full font-medium ${getStatusClass(current)}`}>
+                      {current.replace(/_/g, " ")}
+                    </span>
+                    <span className={`text-xs px-3 py-1 rounded-full font-medium ${(b.payment_status === "paid") ? "bg-success/20 text-success" : (b.payment_status === "requested") ? "bg-info/20 text-info" : "bg-warning/20 text-warning"}`}>
+                      Payment: {(b.payment_status || "unpaid").replace(/_/g, " ")}
+                    </span>
+                    <span className="text-sm font-semibold text-foreground">₹{b.amount}</span>
+                  </div>
+                </div>
+
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {lifecycleOrder.map((step, idx) => {
+                    const done = currentStageIndex >= idx;
+                    return (
+                      <span
+                        key={`${b.id}-${step}`}
+                        className={`text-[10px] px-2 py-1 rounded-full border uppercase tracking-wide ${done ? "bg-accent/20 border-accent/40 text-foreground" : "bg-background/50 border-border text-muted-foreground"}`}
+                      >
+                        {step.replace(/_/g, " ")}
+                      </span>
+                    );
+                  })}
+                </div>
+
+                <div className="mt-4 flex items-center gap-2">
+                  <select
+                    value={draftStatus}
+                    onChange={(e) =>
+                      setBookingStatusDrafts((prev) => ({
+                        ...prev,
+                        [b.id]: e.target.value,
+                      }))
+                    }
+                    className="h-9 rounded-md border border-border bg-background px-3 text-sm text-foreground"
+                  >
+                    {allAdminStatuses.map((s) => (
+                      <option key={s} value={s}>{s.replace(/_/g, " ")}</option>
+                    ))}
+                  </select>
+                  <Button
+                    size="sm"
+                    disabled={updatingBookingId === b.id || draftStatus === b.status}
+                    onClick={() => handleAdminBookingStatusChange(b)}
+                  >
+                    {updatingBookingId === b.id ? "Updating..." : "Update Status"}
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      )}
+    </div>
+  );
+
   /* =========================================================
      RENDER LIVE ACTIVITY
   ========================================================= */
@@ -716,7 +869,7 @@ const handleApproveService = async (id: string) => {
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-3">
-        {["overview", "approvals", "services", "users", "providers", "live"].map((tab) => (
+        {["overview", "approvals", "services", "users", "providers", "bookings", "live"].map((tab) => (
           <Button
             key={tab}
             variant={activeTab === tab ? "default" : "outline"}
@@ -737,6 +890,7 @@ const handleApproveService = async (id: string) => {
       {activeTab === "services" && renderActiveServices()}
       {activeTab === "users" && renderUsers()}
       {activeTab === "providers" && renderProviders()}
+      {activeTab === "bookings" && renderBookings()}
       {activeTab === "live" && renderLiveActivity()}
 
       {/* ADD SERVICE MODAL */}
