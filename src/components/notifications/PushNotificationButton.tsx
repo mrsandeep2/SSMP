@@ -28,6 +28,12 @@ const PushNotificationButton = () => {
         return;
       }
 
+      if (result.message.toLowerCase().includes("native push")) {
+        setStatusTone("success");
+        setStatusMessage(result.message);
+        return;
+      }
+
       const status = await getSubscriptionStatus();
       if (status.isSubscribed) {
         setStatusTone("success");

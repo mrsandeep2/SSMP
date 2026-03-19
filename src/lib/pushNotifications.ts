@@ -15,6 +15,90 @@ type PushActionResult = {
   message: string;
 };
 
+type NativeUpsertResult = {
+  ok: boolean;
+  mode?: "subscribed" | "already-subscribed";
+  message?: string;
+  endpoint?: string;
+};
+
+const getMedianBridge = () => {
+  const w = window as any;
+  return w.median?.onesignal || w.gonative?.onesignal || null;
+};
+
+const hasWebPushSupport = () => {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+};
+
+const getMedianOneSignalInfo = async (bridge: any) => {
+  if (!bridge) return null;
+
+  if (typeof bridge.onesignalInfo === "function") {
+    return await bridge.onesignalInfo();
+  }
+
+  if (typeof bridge.info === "function") {
+    return await bridge.info();
+  }
+
+  return null;
+};
+
+const upsertNativeBridgeSubscription = async (userId: string, oneSignalInfo: any): Promise<NativeUpsertResult> => {
+  const subscriptionId = oneSignalInfo?.subscription?.id;
+  if (!subscriptionId) {
+    return { ok: false, message: "OneSignal subscription id is not available yet." };
+  }
+
+  const endpoint = `onesignal:${subscriptionId}`;
+
+  const { data: existing, error: selectError } = (await supabase
+    .from("push_subscriptions" as any)
+    .select("id")
+    .eq("user_id", userId)
+    .eq("endpoint", endpoint)
+    .maybeSingle()) as any;
+
+  if (selectError) {
+    return { ok: false, message: selectError.message };
+  }
+
+  const payload = {
+    user_id: userId,
+    endpoint,
+    p256dh: "native",
+    auth: "native",
+    subscription: {
+      provider: "median-onesignal",
+      oneSignalId: oneSignalInfo?.oneSignalId,
+      externalId: oneSignalInfo?.externalId,
+      subscription: oneSignalInfo?.subscription,
+      platform: oneSignalInfo?.platform,
+      appVersion: oneSignalInfo?.appVersion,
+    },
+    user_agent: navigator.userAgent,
+    is_active: true,
+    last_seen_at: new Date().toISOString(),
+  };
+
+  const operation = existing
+    ? supabase.from("push_subscriptions" as any).update(payload).eq("id", (existing as any).id)
+    : supabase.from("push_subscriptions" as any).insert(payload);
+
+  const { error: writeError } = await operation;
+  if (writeError) {
+    return { ok: false, message: writeError.message };
+  }
+
+  return {
+    ok: true,
+    mode: existing ? "already-subscribed" : "subscribed",
+    message: existing ? "Native push already enabled on this app." : "Native push enabled successfully.",
+    endpoint,
+  };
+};
+
 export const urlBase64ToUint8Array = (base64String: string) => {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
@@ -38,16 +122,22 @@ const getCurrentUser = async () => {
   return user;
 };
 
-const ensureSupportedBrowser = () => {
-  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
-};
-
 const registerServiceWorker = async () => {
   return navigator.serviceWorker.register("/sw.js");
 };
 
 export const getSubscriptionStatus = async () => {
-  if (!ensureSupportedBrowser()) {
+  const bridge = getMedianBridge();
+  if (!hasWebPushSupport() && bridge) {
+    const info = await getMedianOneSignalInfo(bridge);
+    return {
+      supported: true as const,
+      isSubscribed: Boolean(info?.subscription?.id && info?.subscription?.optedIn !== false),
+      endpoint: info?.subscription?.id ? `onesignal:${info.subscription.id}` : undefined,
+    };
+  }
+
+  if (!hasWebPushSupport()) {
     return { supported: false as const, isSubscribed: false as const };
   }
 
@@ -61,13 +151,47 @@ export const getSubscriptionStatus = async () => {
 };
 
 export const subscribeUser = async (): Promise<PushActionResult> => {
-  if (!ensureSupportedBrowser()) {
-    return { ok: false, message: "This browser does not support push notifications." };
-  }
-
   const user = await getCurrentUser();
   if (!user) {
     return { ok: false, message: "Please log in before enabling notifications." };
+  }
+
+  const bridge = getMedianBridge();
+  if (!hasWebPushSupport() && bridge) {
+    if (typeof bridge.userPrivacyConsent?.grant === "function") {
+      try {
+        await bridge.userPrivacyConsent.grant();
+      } catch {
+        // best effort
+      }
+    }
+
+    if (typeof bridge.register === "function") {
+      await bridge.register();
+    }
+
+    if (typeof bridge.login === "function") {
+      await bridge.login(user.id);
+    }
+
+    const info = await getMedianOneSignalInfo(bridge);
+    const nativeResult = await upsertNativeBridgeSubscription(user.id, info);
+    if (!nativeResult.ok) {
+      return { ok: false, message: nativeResult.message || "Native push setup failed in mobile app." };
+    }
+
+    return {
+      ok: true,
+      mode: nativeResult.mode,
+      message: nativeResult.message || "Native push enabled successfully.",
+    };
+  }
+
+  if (!hasWebPushSupport()) {
+    return {
+      ok: false,
+      message: "Push is not supported in this environment. In Median app, enable OneSignal plugin in App Studio.",
+    };
   }
 
   if (Notification.permission === "denied") {
@@ -146,13 +270,36 @@ export const subscribeUser = async (): Promise<PushActionResult> => {
 };
 
 export const unsubscribeUser = async (): Promise<PushActionResult> => {
-  if (!ensureSupportedBrowser()) {
-    return { ok: false, message: "This browser does not support push notifications." };
-  }
-
   const user = await getCurrentUser();
   if (!user) {
     return { ok: false, message: "Please log in before disabling notifications." };
+  }
+
+  const bridge = getMedianBridge();
+  if (!hasWebPushSupport() && bridge) {
+    if (typeof bridge.logout === "function") {
+      try {
+        await bridge.logout();
+      } catch {
+        // best effort
+      }
+    }
+
+    const info = await getMedianOneSignalInfo(bridge);
+    const subId = info?.subscription?.id;
+    if (subId) {
+      await supabase
+        .from("push_subscriptions" as any)
+        .update({ is_active: false, last_seen_at: new Date().toISOString() })
+        .eq("user_id", user.id)
+        .eq("endpoint", `onesignal:${subId}`);
+    }
+
+    return { ok: true, mode: "unsubscribed", message: "Native push disabled for this app session." };
+  }
+
+  if (!hasWebPushSupport()) {
+    return { ok: false, message: "Push is not supported in this environment." };
   }
 
   const registration = await registerServiceWorker();

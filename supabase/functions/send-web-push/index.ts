@@ -155,7 +155,7 @@ Deno.serve(async (req) => {
 
     if (fetchError) throw fetchError;
 
-    const rows = subscriptions ?? [];
+    const rows = (subscriptions ?? []).filter((s) => String(s.endpoint || "").startsWith("https://"));
     if (rows.length === 0) {
       return new Response(JSON.stringify({ ok: true, sent: 0, reason: "no_subscriptions" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
