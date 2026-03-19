@@ -82,11 +82,7 @@ const upsertNativeBridgeSubscription = async (userId: string, oneSignalInfo: any
     last_seen_at: new Date().toISOString(),
   };
 
-  const operation = existing
-    ? supabase.from("push_subscriptions" as any).update(payload).eq("id", (existing as any).id)
-    : supabase.from("push_subscriptions" as any).insert(payload);
-
-  const { error: writeError } = await operation;
+  const { error: writeError } = await writePushSubscription((existing as any)?.id ?? null, payload);
   if (writeError) {
     return { ok: false, message: writeError.message };
   }
@@ -113,6 +109,32 @@ export const urlBase64ToUint8Array = (base64String: string) => {
 
 const getSubscriptionPayload = (subscription: PushSubscription): PushSubscriptionJson => {
   return subscription.toJSON() as PushSubscriptionJson;
+};
+
+const isMissingSubscriptionColumnError = (error: any) => {
+  const msg = String(error?.message || "").toLowerCase();
+  return msg.includes("could not find") && msg.includes("subscription") && msg.includes("push_subscriptions");
+};
+
+const writePushSubscription = async (existingId: string | null, payload: Record<string, any>) => {
+  const firstOp = existingId
+    ? supabase.from("push_subscriptions" as any).update(payload).eq("id", existingId)
+    : supabase.from("push_subscriptions" as any).insert(payload);
+
+  const first = await firstOp;
+  if (!first.error) return { error: null };
+
+  if (!isMissingSubscriptionColumnError(first.error)) {
+    return { error: first.error };
+  }
+
+  const { subscription, ...fallbackPayload } = payload;
+  const retryOp = existingId
+    ? supabase.from("push_subscriptions" as any).update(fallbackPayload).eq("id", existingId)
+    : supabase.from("push_subscriptions" as any).insert(fallbackPayload);
+
+  const retry = await retryOp;
+  return { error: retry.error };
 };
 
 const getCurrentUser = async () => {
@@ -253,11 +275,7 @@ export const subscribeUser = async (): Promise<PushActionResult> => {
     last_seen_at: new Date().toISOString(),
   };
 
-  const operation = existing
-    ? supabase.from("push_subscriptions" as any).update(payload).eq("id", (existing as any).id)
-    : supabase.from("push_subscriptions" as any).insert(payload);
-
-  const { error: writeError } = await operation;
+  const { error: writeError } = await writePushSubscription((existing as any)?.id ?? null, payload);
   if (writeError) {
     return { ok: false, message: writeError.message };
   }
