@@ -47,6 +47,33 @@ const normalizeStatus = (status: string) => {
   return status;
 };
 
+const statusHardAlertMeta: Record<string, { title: string; body: string }> = {
+  accepted: {
+    title: "Provider accepted your booking",
+    body: "Your booking has been accepted. Open dashboard for live progress.",
+  },
+  on_the_way: {
+    title: "Provider is on the way",
+    body: "Your provider started travel. Check live tracking now.",
+  },
+  arrived: {
+    title: "Provider has arrived",
+    body: "Your provider has reached your location.",
+  },
+  started: {
+    title: "Service has started",
+    body: "Your provider marked the service as started.",
+  },
+  completed: {
+    title: "Service marked completed",
+    body: "Your provider marked the service as completed.",
+  },
+  cancelled: {
+    title: "Booking was cancelled",
+    body: "Your provider updated this booking to cancelled.",
+  },
+};
+
 const statusLabel = (status: string) => normalizeStatus(status).replace(/_/g, " ");
 
 const bookingStages = ["accepted", "on_the_way", "arrived", "started", "completed"];
@@ -211,20 +238,19 @@ const SeekerDashboard = () => {
                 description: `Your booking is now ${statusLabel(nextStatus)}.`,
               });
 
-              if (["accepted", "on_the_way"].includes(nextStatus)) {
-                const statusAlertKey = `${payload.new?.id}:${nextStatus}`;
-                if (!handledRealtimeAlertKeysRef.current.has(statusAlertKey)) {
-                  handledRealtimeAlertKeysRef.current.add(statusAlertKey);
-                  void triggerHardNotification({
-                    title: nextStatus === "accepted" ? "Provider accepted your booking" : "Provider is on the way",
-                    body:
-                      nextStatus === "accepted"
-                        ? "Your booking has been accepted. Open dashboard for live progress."
-                        : "Your provider started travel. Check live tracking now.",
-                    tag: `seeker-booking-status-${payload.new?.id}-${nextStatus}`,
-                    requireInteraction: true,
-                  });
-                }
+              const statusAlertMeta = statusHardAlertMeta[nextStatus] ?? {
+                title: "Booking status updated",
+                body: `Your booking is now ${statusLabel(nextStatus)}.`,
+              };
+              const statusAlertKey = `${payload.new?.id}:${nextStatus}`;
+              if (!handledRealtimeAlertKeysRef.current.has(statusAlertKey)) {
+                handledRealtimeAlertKeysRef.current.add(statusAlertKey);
+                void triggerHardNotification({
+                  title: statusAlertMeta.title,
+                  body: statusAlertMeta.body,
+                  tag: `seeker-booking-status-${payload.new?.id}-${nextStatus}`,
+                  requireInteraction: true,
+                });
               }
             }
 

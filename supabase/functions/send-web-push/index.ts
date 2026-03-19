@@ -14,11 +14,13 @@ type BookingRecord = {
 };
 
 type PushEventPayload = {
-  event_type: "booking_created" | "booking_status_updated" | "booking_payment_requested";
+  event_type: "booking_created" | "booking_status_updated" | "booking_payment_requested" | "booking_payment_updated";
   booking: BookingRecord;
   old_booking?: BookingRecord | null;
   from_status?: string | null;
   to_status?: string | null;
+  from_payment_status?: string | null;
+  to_payment_status?: string | null;
   trigger_actor_id?: string | null;
 };
 
@@ -60,6 +62,7 @@ const sanitizeStatus = (status: string | null | undefined) => {
 };
 
 const statusLabel = (status: string | null | undefined) => sanitizeStatus(status).replace(/_/g, " ");
+const paymentLabel = (payment: string | null | undefined) => (payment || "unpaid").replace(/_/g, " ");
 
 const buildTarget = (payload: PushEventPayload): PushTarget | null => {
   const booking = payload.booking;
@@ -108,6 +111,29 @@ const buildTarget = (payload: PushEventPayload): PushTarget | null => {
       title: "Payment requested",
       body: "Payment action is required for your booking.",
       tag: `seeker-payment-request-${booking.id}`,
+      url: "/dashboard/seeker",
+    };
+  }
+
+  if (payload.event_type === "booking_payment_updated" && oldPayment !== newPayment) {
+    const fromPayment = paymentLabel(payload.from_payment_status ?? oldPayment);
+    const toPayment = paymentLabel(payload.to_payment_status ?? newPayment);
+
+    if (newPayment === "paid") {
+      return {
+        userId: booking.seeker_id,
+        title: "Payment received successfully",
+        body: "Your provider confirmed payment. Booking can now be completed.",
+        tag: `seeker-payment-paid-${booking.id}`,
+        url: "/dashboard/seeker",
+      };
+    }
+
+    return {
+      userId: booking.seeker_id,
+      title: "Payment status updated",
+      body: `Payment changed from ${fromPayment} to ${toPayment}.`,
+      tag: `seeker-payment-status-${booking.id}-${newPayment}`,
       url: "/dashboard/seeker",
     };
   }
@@ -227,6 +253,7 @@ Deno.serve(async (req) => {
     if (nativeRows.length > 0) {
       const oneSignalAppId = Deno.env.get("ONESIGNAL_APP_ID");
       const oneSignalApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
+      const oneSignalAndroidChannelId = Deno.env.get("ONESIGNAL_ANDROID_CHANNEL_ID");
 
       if (!oneSignalAppId || !oneSignalApiKey) {
         console.warn("onesignal_credentials_missing");
@@ -251,11 +278,17 @@ Deno.serve(async (req) => {
               include_subscription_ids: includeSubscriptionIds,
               headings: { en: target.title },
               contents: { en: target.body },
+              priority: 10,
+              ttl: 180,
+              android_priority: "high",
+              android_visibility: 1,
+              delayed_option: "timezone",
+              ios_interruption_level: "time-sensitive",
               data: {
                 url: target.url,
                 tag: target.tag,
               },
-              android_channel_id: null,
+              android_channel_id: oneSignalAndroidChannelId || null,
             }),
           });
 
