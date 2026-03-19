@@ -30,6 +30,23 @@ type PushTarget = {
   url: string;
 };
 
+type StoredSubscription = {
+  id: string;
+  endpoint: string;
+  p256dh: string;
+  auth: string;
+  subscription?: {
+    provider?: string;
+    oneSignalId?: string;
+    externalId?: string;
+    subscription?: {
+      id?: string;
+      token?: string;
+      optedIn?: boolean;
+    };
+  } | null;
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-webhook-secret",
@@ -149,14 +166,17 @@ Deno.serve(async (req) => {
 
     const { data: subscriptions, error: fetchError } = await supabaseAdmin
       .from("push_subscriptions")
-      .select("id, endpoint, p256dh, auth")
+      .select("id, endpoint, p256dh, auth, subscription")
       .eq("user_id", target.userId)
       .eq("is_active", true);
 
     if (fetchError) throw fetchError;
 
-    const rows = (subscriptions ?? []).filter((s) => String(s.endpoint || "").startsWith("https://"));
-    if (rows.length === 0) {
+    const rows = (subscriptions ?? []) as StoredSubscription[];
+    const webPushRows = rows.filter((s) => String(s.endpoint || "").startsWith("https://"));
+    const nativeRows = rows.filter((s) => String(s.endpoint || "").startsWith("onesignal:"));
+
+    if (webPushRows.length === 0 && nativeRows.length === 0) {
       return new Response(JSON.stringify({ ok: true, sent: 0, reason: "no_subscriptions" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -173,31 +193,81 @@ Deno.serve(async (req) => {
     });
 
     const invalidIds: string[] = [];
+    let webSent = 0;
+    let nativeSent = 0;
 
-    await Promise.all(
-      rows.map(async (sub) => {
-        try {
-          await webpush.sendNotification(
-            {
-              endpoint: sub.endpoint,
-              keys: {
-                p256dh: sub.p256dh,
-                auth: sub.auth,
+    if (webPushRows.length > 0) {
+      await Promise.all(
+        webPushRows.map(async (sub) => {
+          try {
+            await webpush.sendNotification(
+              {
+                endpoint: sub.endpoint,
+                keys: {
+                  p256dh: sub.p256dh,
+                  auth: sub.auth,
+                },
               },
-            },
-            message,
-            { TTL: 120 }
-          );
-        } catch (err: any) {
-          const statusCode = err?.statusCode;
-          if (statusCode === 404 || statusCode === 410) {
-            invalidIds.push(sub.id);
-            return;
+              message,
+              { TTL: 120 }
+            );
+            webSent += 1;
+          } catch (err: any) {
+            const statusCode = err?.statusCode;
+            if (statusCode === 404 || statusCode === 410) {
+              invalidIds.push(sub.id);
+              return;
+            }
+            console.error("push_send_failed", err?.message ?? err);
           }
-          console.error("push_send_failed", err?.message ?? err);
+        })
+      );
+    }
+
+    if (nativeRows.length > 0) {
+      const oneSignalAppId = Deno.env.get("ONESIGNAL_APP_ID");
+      const oneSignalApiKey = Deno.env.get("ONESIGNAL_REST_API_KEY");
+
+      if (!oneSignalAppId || !oneSignalApiKey) {
+        console.warn("onesignal_credentials_missing");
+      } else {
+        const includeSubscriptionIds = nativeRows
+          .map((s) => {
+            const byEndpoint = s.endpoint.startsWith("onesignal:") ? s.endpoint.slice("onesignal:".length) : "";
+            const byPayload = s.subscription?.subscription?.id || "";
+            return (byPayload || byEndpoint).trim();
+          })
+          .filter(Boolean);
+
+        if (includeSubscriptionIds.length > 0) {
+          const oneSignalRes = await fetch("https://onesignal.com/api/v1/notifications", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              Authorization: `Basic ${oneSignalApiKey}`,
+            },
+            body: JSON.stringify({
+              app_id: oneSignalAppId,
+              include_subscription_ids: includeSubscriptionIds,
+              headings: { en: target.title },
+              contents: { en: target.body },
+              data: {
+                url: target.url,
+                tag: target.tag,
+              },
+              android_channel_id: null,
+            }),
+          });
+
+          if (!oneSignalRes.ok) {
+            const errorText = await oneSignalRes.text();
+            console.error("onesignal_send_failed", errorText);
+          } else {
+            nativeSent = includeSubscriptionIds.length;
+          }
         }
-      })
-    );
+      }
+    }
 
     if (invalidIds.length > 0) {
       await supabaseAdmin
@@ -207,7 +277,13 @@ Deno.serve(async (req) => {
     }
 
     return new Response(
-      JSON.stringify({ ok: true, sent: rows.length - invalidIds.length, invalidated: invalidIds.length }),
+      JSON.stringify({
+        ok: true,
+        sent: webSent + nativeSent,
+        web_sent: webSent,
+        native_sent: nativeSent,
+        invalidated: invalidIds.length,
+      }),
       { headers: { ...corsHeaders, "Content-Type": "application/json" } }
     );
   } catch (error: any) {

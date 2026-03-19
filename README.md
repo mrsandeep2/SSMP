@@ -69,6 +69,8 @@ Set these in Supabase project secrets:
 - `WEB_PUSH_VAPID_PRIVATE_KEY`
 - `WEB_PUSH_SUBJECT` (example: `mailto:ops@yourdomain.com`)
 - `PUSH_WEBHOOK_SECRET` (random shared secret)
+- `ONESIGNAL_APP_ID` (required for Median native push delivery)
+- `ONESIGNAL_REST_API_KEY` (required for Median native push delivery)
 
 ### 4. Deploy the new Edge Function
 
