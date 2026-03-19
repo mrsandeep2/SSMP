@@ -102,6 +102,7 @@ const SeekerDashboard = () => {
   const [reviewComment, setReviewComment] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
   const handledRealtimeAlertKeysRef = useRef<Set<string>>(new Set());
+  const lastKnownBookingStatusRef = useRef<Record<string, string>>({});
 
   useEffect(() => {
     if (!loading && !user) navigate("/login");
@@ -192,6 +193,16 @@ const SeekerDashboard = () => {
   });
   const reviewedSet = new Set((myReviews as any[]).map((r) => r.booking_id));
 
+  useEffect(() => {
+    const nextStatusMap: Record<string, string> = {};
+    (bookings as any[]).forEach((booking: any) => {
+      if (booking?.id) {
+        nextStatusMap[booking.id] = normalizeStatus(booking.status || "");
+      }
+    });
+    lastKnownBookingStatusRef.current = nextStatusMap;
+  }, [bookings]);
+
   // Log any errors
   useEffect(() => {
     if (bookingsError) {
@@ -227,10 +238,17 @@ const SeekerDashboard = () => {
         (payload: any) => {
           console.log("📲 Booking updated for seeker:", payload);
           if (payload.eventType === "UPDATE") {
-            const previousStatus = normalizeStatus(payload.old?.status || "");
+            const bookingId = payload.new?.id as string | undefined;
+            const previousStatusFromPayload = normalizeStatus(payload.old?.status || "");
+            const previousStatusFromCache = bookingId ? lastKnownBookingStatusRef.current[bookingId] || "" : "";
+            const previousStatus = previousStatusFromPayload || previousStatusFromCache;
             const nextStatus = normalizeStatus(payload.new?.status || "");
             const previousPayment = payload.old?.payment_status || "unpaid";
             const nextPayment = payload.new?.payment_status || "unpaid";
+
+            if (bookingId && nextStatus) {
+              lastKnownBookingStatusRef.current[bookingId] = nextStatus;
+            }
 
             if (previousStatus && nextStatus && previousStatus !== nextStatus) {
               toast({

@@ -78,13 +78,18 @@ const buildTarget = (payload: PushEventPayload): PushTarget | null => {
     };
   }
 
-  if (
-    payload.event_type === "booking_status_updated" &&
-    payload.trigger_actor_id === booking.provider_id &&
-    payload.old_booking?.status !== booking.status
-  ) {
-    const fromStatus = statusLabel(payload.from_status ?? payload.old_booking?.status);
-    const toStatus = statusLabel(payload.to_status ?? booking.status);
+  if (payload.event_type === "booking_status_updated") {
+    const fromRawStatus = payload.from_status ?? payload.old_booking?.status;
+    const toRawStatus = payload.to_status ?? booking.status;
+    const fromStatusNormalized = sanitizeStatus(fromRawStatus);
+    const toStatusNormalized = sanitizeStatus(toRawStatus);
+
+    if (fromStatusNormalized === toStatusNormalized) {
+      return null;
+    }
+
+    const fromStatus = statusLabel(fromRawStatus);
+    const toStatus = statusLabel(toRawStatus);
     const title =
       status === "accepted"
         ? "Booking accepted"
