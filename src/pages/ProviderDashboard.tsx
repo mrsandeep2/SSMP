@@ -18,6 +18,7 @@ import { serviceCategories } from "@/data/marketplace";
 import ProviderNavigationMap from "@/components/tracking/ProviderNavigationMap";
 import { getNotificationPermissionState, requestNotificationPermissionIfNeeded, triggerHardNotification } from "@/lib/hardNotifications";
 import { registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
+import PushNotificationButton from "@/components/notifications/PushNotificationButton";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -589,6 +590,9 @@ const ProviderDashboard = () => {
                     <Button variant="outline" size="sm" onClick={checkNotificationPermission}>Check again</Button>
                   )}
                 </div>
+              </div>
+              <div className="mt-3">
+                <PushNotificationButton />
               </div>
             </div>
           )}

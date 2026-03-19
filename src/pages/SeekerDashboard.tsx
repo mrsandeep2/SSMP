@@ -15,6 +15,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { requestNotificationPermissionIfNeeded, triggerHardNotification } from "@/lib/hardNotifications";
 import { registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
+import PushNotificationButton from "@/components/notifications/PushNotificationButton";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/20 text-warning",
@@ -455,6 +456,10 @@ const SeekerDashboard = () => {
                 <User className="w-4 h-4 mr-1" /> Edit Profile
               </Button>
             </div>
+          </div>
+
+          <div className="mb-6">
+            <PushNotificationButton />
           </div>
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">

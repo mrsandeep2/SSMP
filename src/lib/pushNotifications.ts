@@ -6,9 +6,16 @@ type PushSubscriptionJson = {
     p256dh?: string;
     auth?: string;
   };
+  expirationTime?: number | null;
 };
 
-const base64ToUint8Array = (base64String: string) => {
+type PushActionResult = {
+  ok: boolean;
+  mode?: "subscribed" | "already-subscribed" | "unsubscribed";
+  message: string;
+};
+
+export const urlBase64ToUint8Array = (base64String: string) => {
   const padding = "=".repeat((4 - (base64String.length % 4)) % 4);
   const base64 = (base64String + padding).replace(/-/g, "+").replace(/_/g, "/");
   const rawData = atob(base64);
@@ -24,57 +31,158 @@ const getSubscriptionPayload = (subscription: PushSubscription): PushSubscriptio
   return subscription.toJSON() as PushSubscriptionJson;
 };
 
-export const registerBackgroundPushForCurrentUser = async () => {
-  if (!("serviceWorker" in navigator) || !("PushManager" in window) || !("Notification" in window)) {
-    return { ok: false as const, reason: "unsupported" as const };
+const getCurrentUser = async () => {
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+  return user;
+};
+
+const ensureSupportedBrowser = () => {
+  return "serviceWorker" in navigator && "PushManager" in window && "Notification" in window;
+};
+
+const registerServiceWorker = async () => {
+  return navigator.serviceWorker.register("/sw.js");
+};
+
+export const getSubscriptionStatus = async () => {
+  if (!ensureSupportedBrowser()) {
+    return { supported: false as const, isSubscribed: false as const };
   }
 
-  if (Notification.permission !== "granted") {
-    return { ok: false as const, reason: "permission_not_granted" as const };
+  const registration = await registerServiceWorker();
+  const subscription = await registration.pushManager.getSubscription();
+  return {
+    supported: true as const,
+    isSubscribed: Boolean(subscription),
+    endpoint: subscription?.endpoint,
+  };
+};
+
+export const subscribeUser = async (): Promise<PushActionResult> => {
+  if (!ensureSupportedBrowser()) {
+    return { ok: false, message: "This browser does not support push notifications." };
+  }
+
+  const user = await getCurrentUser();
+  if (!user) {
+    return { ok: false, message: "Please log in before enabling notifications." };
+  }
+
+  if (Notification.permission === "denied") {
+    return { ok: false, message: "Notifications are blocked. Enable them in browser site settings." };
+  }
+
+  let permission: NotificationPermission = Notification.permission;
+  if (permission === "default") {
+    permission = await Notification.requestPermission();
+  }
+
+  if (permission !== "granted") {
+    return { ok: false, message: "Notification permission is required to enable push alerts." };
   }
 
   const vapidPublicKey = import.meta.env.VITE_WEB_PUSH_PUBLIC_KEY as string | undefined;
   if (!vapidPublicKey) {
-    return { ok: false as const, reason: "missing_vapid_public_key" as const };
+    return { ok: false, message: "VITE_WEB_PUSH_PUBLIC_KEY is missing in frontend environment." };
   }
 
-  const {
-    data: { user },
-  } = await supabase.auth.getUser();
-
-  if (!user) {
-    return { ok: false as const, reason: "no_user" as const };
-  }
-
-  const registration = await navigator.serviceWorker.register("/web-push-sw.js");
-
+  const registration = await registerServiceWorker();
   let subscription = await registration.pushManager.getSubscription();
+
   if (!subscription) {
     subscription = await registration.pushManager.subscribe({
       userVisibleOnly: true,
-      applicationServerKey: base64ToUint8Array(vapidPublicKey),
+      applicationServerKey: urlBase64ToUint8Array(vapidPublicKey),
     });
   }
 
-  const payload = getSubscriptionPayload(subscription);
-  const endpoint = payload.endpoint;
-  const p256dh = payload.keys?.p256dh;
-  const auth = payload.keys?.auth;
+  const subscriptionJson = getSubscriptionPayload(subscription);
+  const endpoint = subscriptionJson.endpoint;
+  const p256dh = subscriptionJson.keys?.p256dh;
+  const auth = subscriptionJson.keys?.auth;
 
   if (!endpoint || !p256dh || !auth) {
-    return { ok: false as const, reason: "invalid_subscription" as const };
+    return { ok: false, message: "Push subscription payload is invalid." };
   }
 
-  const { error } = await supabase.rpc("register_push_subscription" as any, {
-    p_endpoint: endpoint,
-    p_p256dh: p256dh,
-    p_auth: auth,
-    p_user_agent: navigator.userAgent,
-  } as any);
+  const { data: existing, error: selectError } = (await supabase
+    .from("push_subscriptions" as any)
+    .select("id")
+    .eq("user_id", user.id)
+    .eq("endpoint", endpoint)
+    .maybeSingle()) as any;
+
+  if (selectError) {
+    return { ok: false, message: selectError.message };
+  }
+
+  const payload = {
+    user_id: user.id,
+    endpoint,
+    p256dh,
+    auth,
+    subscription: subscriptionJson,
+    user_agent: navigator.userAgent,
+    is_active: true,
+    last_seen_at: new Date().toISOString(),
+  };
+
+  const operation = existing
+    ? supabase.from("push_subscriptions" as any).update(payload).eq("id", (existing as any).id)
+    : supabase.from("push_subscriptions" as any).insert(payload);
+
+  const { error: writeError } = await operation;
+  if (writeError) {
+    return { ok: false, message: writeError.message };
+  }
+
+  return {
+    ok: true,
+    mode: existing ? "already-subscribed" : "subscribed",
+    message: existing ? "Already subscribed on this device." : "Notifications enabled successfully.",
+  };
+};
+
+export const unsubscribeUser = async (): Promise<PushActionResult> => {
+  if (!ensureSupportedBrowser()) {
+    return { ok: false, message: "This browser does not support push notifications." };
+  }
+
+  const user = await getCurrentUser();
+  if (!user) {
+    return { ok: false, message: "Please log in before disabling notifications." };
+  }
+
+  const registration = await registerServiceWorker();
+  const subscription = await registration.pushManager.getSubscription();
+
+  if (!subscription) {
+    return { ok: true, mode: "unsubscribed", message: "No active subscription found on this device." };
+  }
+
+  const endpoint = subscription.endpoint;
+  await subscription.unsubscribe();
+
+  const { error } = await supabase
+    .from("push_subscriptions" as any)
+    .update({ is_active: false, last_seen_at: new Date().toISOString() })
+    .eq("user_id", user.id)
+    .eq("endpoint", endpoint);
 
   if (error) {
-    return { ok: false as const, reason: "rpc_failed" as const, error };
+    return { ok: false, message: error.message };
   }
 
-  return { ok: true as const };
+  return { ok: true, mode: "unsubscribed", message: "Notifications disabled on this device." };
+};
+
+export const registerBackgroundPushForCurrentUser = async () => {
+  const result = await subscribeUser();
+  return {
+    ok: result.ok,
+    reason: result.ok ? undefined : "subscription_failed",
+    message: result.message,
+  };
 };
