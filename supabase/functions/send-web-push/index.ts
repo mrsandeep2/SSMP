@@ -92,13 +92,16 @@ const buildTarget = (payload: PushEventPayload): PushTarget | null => {
     const toStatus = statusLabel(toRawStatus);
     const title =
       status === "accepted"
-        ? "Booking accepted"
+        ? "Your service request is accepted by provider"
         : `Booking status updated: ${toStatus}`;
 
     return {
       userId: booking.seeker_id,
       title,
-      body: `Provider changed booking status from ${fromStatus} to ${toStatus}. Open dashboard for details.`,
+      body:
+        status === "accepted"
+          ? "Provider accepted your service request. Open dashboard for details."
+          : `Provider changed booking status from ${fromStatus} to ${toStatus}. Open dashboard for details.`,
       tag: `seeker-booking-status-${booking.id}-${status}`,
       url: "/dashboard/seeker",
     };
@@ -240,7 +243,7 @@ Deno.serve(async (req) => {
                 },
               },
               message,
-              { TTL: 120 }
+              { TTL: 86400 }
             );
             webSent += 1;
           } catch (err: any) {
@@ -284,7 +287,7 @@ Deno.serve(async (req) => {
               headings: { en: target.title },
               contents: { en: target.body },
               priority: 10,
-              ttl: 180,
+              ttl: 86400,
               android_priority: "high",
               android_visibility: 1,
               delayed_option: "timezone",

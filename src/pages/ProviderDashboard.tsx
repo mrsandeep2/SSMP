@@ -19,6 +19,8 @@ import ProviderNavigationMap from "@/components/tracking/ProviderNavigationMap";
 import { getNotificationPermissionState, requestNotificationPermissionIfNeeded, triggerHardNotification } from "@/lib/hardNotifications";
 import { registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
 import PushNotificationButton from "@/components/notifications/PushNotificationButton";
+import RealtimeNotificationBell from "@/components/notifications/RealtimeNotificationBell";
+import { usePersistentNotifications } from "@/hooks/usePersistentNotifications";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
 } from "@/components/ui/select";
@@ -103,6 +105,7 @@ const ProviderDashboard = () => {
   const [editName, setEditName] = useState("");
   const locationWatchRef = useRef<number | null>(null);
   const alertedBookingIdsRef = useRef<Set<string>>(new Set());
+  const { unreadNotifications, unreadCount, markRead, markAllRead } = usePersistentNotifications(user?.id);
 
   useEffect(() => {
     if (!loading && !user) navigate("/login");
@@ -538,6 +541,18 @@ const ProviderDashboard = () => {
               <p className="text-muted-foreground mt-1">Manage your services and earnings</p>
             </div>
             <div className="flex items-center gap-3">
+              <RealtimeNotificationBell
+                items={unreadNotifications.map((item) => ({
+                  id: item.id,
+                  title: item.title,
+                  body: item.body,
+                  createdAt: item.created_at,
+                }))}
+                unreadCount={unreadCount}
+                onDismiss={markRead}
+                onClearAll={markAllRead}
+                onViewAll={() => navigate("/notifications")}
+              />
               <Button variant="outline" size="sm" className="rounded-lg" onClick={() => navigate("/")}>
                 <Home className="w-4 h-4 mr-1" /> Back to Home
               </Button>

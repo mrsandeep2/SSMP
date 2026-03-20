@@ -7,7 +7,6 @@ type HardNotificationInput = {
 };
 
 const DEFAULT_FLASH_DURATION_MS = 15000;
-const IN_APP_POPUP_DURATION_MS = 12000;
 
 let sharedAudioContext: AudioContext | null = null;
 let audioUnlockWired = false;
@@ -46,68 +45,6 @@ const wireAudioUnlock = () => {
   window.addEventListener("pointerdown", unlock, { passive: true });
   window.addEventListener("keydown", unlock, { passive: true });
   window.addEventListener("touchstart", unlock, { passive: true });
-};
-
-const showInAppHardPopup = (title: string, body: string) => {
-  if (typeof document === "undefined") return;
-
-  const containerId = "hard-notification-overlay-root";
-  let container = document.getElementById(containerId);
-  if (!container) {
-    container = document.createElement("div");
-    container.id = containerId;
-    container.style.position = "fixed";
-    container.style.top = "16px";
-    container.style.right = "16px";
-    container.style.zIndex = "2147483647";
-    container.style.display = "flex";
-    container.style.flexDirection = "column";
-    container.style.gap = "10px";
-    container.style.maxWidth = "min(92vw, 360px)";
-    container.style.pointerEvents = "none";
-    document.body.appendChild(container);
-  }
-
-  const popup = document.createElement("div");
-  popup.setAttribute("role", "alert");
-  popup.style.background = "linear-gradient(135deg, #111827, #1f2937)";
-  popup.style.color = "#f9fafb";
-  popup.style.border = "1px solid rgba(249, 250, 251, 0.16)";
-  popup.style.borderRadius = "12px";
-  popup.style.boxShadow = "0 16px 45px rgba(0,0,0,0.45)";
-  popup.style.padding = "12px 14px";
-  popup.style.pointerEvents = "auto";
-  popup.style.animation = "hardNotifSlideIn 180ms ease-out";
-
-  const heading = document.createElement("div");
-  heading.textContent = title;
-  heading.style.fontSize = "14px";
-  heading.style.fontWeight = "700";
-  heading.style.marginBottom = "4px";
-
-  const content = document.createElement("div");
-  content.textContent = body;
-  content.style.fontSize = "13px";
-  content.style.opacity = "0.92";
-  content.style.lineHeight = "1.35";
-
-  popup.appendChild(heading);
-  popup.appendChild(content);
-  container.appendChild(popup);
-
-  const removePopup = () => {
-    popup.style.opacity = "0";
-    popup.style.transform = "translateY(-8px)";
-    window.setTimeout(() => {
-      popup.remove();
-      if (container && container.childElementCount === 0) {
-        container.remove();
-      }
-    }, 150);
-  };
-
-  popup.addEventListener("click", removePopup);
-  window.setTimeout(removePopup, IN_APP_POPUP_DURATION_MS);
 };
 
 const playAlarmTone = () => {
@@ -194,10 +131,11 @@ export const triggerHardNotification = async ({
 }: HardNotificationInput) => {
   wireAudioUnlock();
 
-  showInAppHardPopup(title, body);
   playAlarmTone();
   vibrateDevice();
-  flashDocumentTitle(title, flashDurationMs);
+
+  // Keep this call so existing callers remain compatible, but skip in-app visual flashing.
+  void flashDurationMs;
 
   if (typeof window === "undefined" || !("Notification" in window)) return;
 

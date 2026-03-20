@@ -14,6 +14,7 @@ import Services from "./pages/Services";
 import SeekerDashboard from "./pages/SeekerDashboard";
 import ProviderDashboard from "./pages/ProviderDashboard";
 import AdminDashboard from "./pages/AdminDashboard";
+import Notifications from "./pages/Notifications";
 import NotFound from "./pages/NotFound";
 
 const queryClient = new QueryClient();
@@ -32,6 +33,7 @@ const App = () => (
             <Route path="/register" element={<Register />} />
             <Route path="/reset-password" element={<ResetPassword />} />
             <Route path="/services" element={<Services />} />
+            <Route path="/notifications" element={<Notifications />} />
             <Route
               path="/dashboard/seeker"
               element={(
