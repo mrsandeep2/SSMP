@@ -40,6 +40,9 @@ const RealtimeNotificationBell = ({
   onViewAll,
 }: RealtimeNotificationBellProps) => {
   const count = unreadCount ?? items.length;
+  const orderedItems = [...items].sort(
+    (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
+  );
 
   return (
     <DropdownMenu>
@@ -53,7 +56,7 @@ const RealtimeNotificationBell = ({
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[calc(100vw-1rem)] max-w-[360px] p-0">
+      <DropdownMenuContent align="end" className="w-[calc(100vw-1rem)] max-w-[380px] p-0">
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
           <DropdownMenuLabel className="p-0">Realtime notifications</DropdownMenuLabel>
           <div className="ml-auto flex items-center gap-1">
@@ -72,32 +75,35 @@ const RealtimeNotificationBell = ({
         </div>
         <DropdownMenuSeparator className="m-0" />
 
-        {items.length === 0 ? (
+        {orderedItems.length === 0 ? (
           <div className="px-3 py-8 text-center text-sm text-muted-foreground">No new notifications</div>
         ) : (
-          <div className="max-h-[360px] overflow-y-auto p-1">
-            {items.map((item) => (
-              <DropdownMenuItem
-                key={item.id}
-                className="group flex items-start justify-between gap-2 rounded-lg px-2.5 py-2"
-              >
-                <div className="min-w-0 flex-1">
-                  <p className="truncate text-sm font-medium text-foreground">{item.title}</p>
-                  <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{item.body}</p>
-                  <p className="mt-1 text-[11px] text-muted-foreground/80">{formatTime(item.createdAt)}</p>
+          <div className="max-h-[380px] overflow-y-auto p-2">
+            {orderedItems.map((item) => (
+              <DropdownMenuItem key={item.id} className="rounded-lg p-0 focus:bg-transparent">
+                <div className="w-full rounded-lg border border-border/60 bg-background/60 px-2.5 py-2">
+                  <div className="flex items-start gap-2">
+                    <div className="min-w-0 flex-1">
+                      <div className="flex items-start justify-between gap-2">
+                        <p className="line-clamp-1 break-words text-sm font-medium text-foreground">{item.title}</p>
+                        <p className="shrink-0 text-[10px] text-muted-foreground/80">{formatTime(item.createdAt)}</p>
+                      </div>
+                      <p className="mt-1 line-clamp-2 break-words text-xs leading-5 text-muted-foreground">{item.body}</p>
+                    </div>
+                    <button
+                      type="button"
+                      aria-label="Dismiss notification"
+                      className="mt-0.5 rounded-md p-1 text-muted-foreground opacity-70 transition hover:bg-accent hover:text-foreground hover:opacity-100"
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        onDismiss(item.id);
+                      }}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </div>
                 </div>
-                <button
-                  type="button"
-                  aria-label="Dismiss notification"
-                  className="rounded-md p-1 text-muted-foreground opacity-70 transition hover:bg-accent hover:text-foreground hover:opacity-100"
-                  onClick={(event) => {
-                    event.preventDefault();
-                    event.stopPropagation();
-                    onDismiss(item.id);
-                  }}
-                >
-                  <X className="h-3.5 w-3.5" />
-                </button>
               </DropdownMenuItem>
             ))}
           </div>
