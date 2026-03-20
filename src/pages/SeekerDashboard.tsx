@@ -490,12 +490,12 @@ const SeekerDashboard = () => {
       <Navbar />
       <div className="container px-4 pt-24 pb-12">
         <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }}>
-          <div className="flex items-center justify-between mb-8">
+          <div className="mb-8 flex flex-col items-start gap-4 md:flex-row md:items-center md:justify-between">
             <div>
-              <h1 className="text-3xl font-bold font-display text-foreground">Welcome back{profile?.name ? `, ${profile.name}` : ""}</h1>
+              <h1 className="text-2xl font-bold font-display text-foreground md:text-3xl">Welcome back{profile?.name ? `, ${profile.name}` : ""}</h1>
               <p className="text-muted-foreground mt-1">What service do you need today?</p>
             </div>
-            <div className="flex items-center gap-3">
+            <div className="flex w-full flex-wrap items-center gap-2 md:w-auto md:justify-end md:gap-3">
               <RealtimeNotificationBell
                 items={unreadNotifications.map((item) => ({
                   id: item.id,
@@ -508,10 +508,10 @@ const SeekerDashboard = () => {
                 onClearAll={markAllRead}
                 onViewAll={() => navigate("/notifications")}
               />
-              <Button variant="outline" size="sm" className="rounded-lg" onClick={() => navigate("/")}>
+              <Button variant="outline" size="sm" className="flex-1 rounded-lg sm:flex-none" onClick={() => navigate("/")}>
                 <Home className="w-4 h-4 mr-1" /> Back to Home
               </Button>
-              <Button variant="ghost" size="sm" className="rounded-lg" onClick={() => setShowEditProfile(true)}>
+              <Button variant="ghost" size="sm" className="flex-1 rounded-lg sm:flex-none" onClick={() => setShowEditProfile(true)}>
                 <User className="w-4 h-4 mr-1" /> Edit Profile
               </Button>
             </div>

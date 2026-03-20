@@ -53,10 +53,10 @@ const RealtimeNotificationBell = ({
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[340px] max-w-[92vw] p-0">
-        <div className="flex items-center justify-between px-3 py-2">
+      <DropdownMenuContent align="end" className="w-[calc(100vw-1rem)] max-w-[360px] p-0">
+        <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
           <DropdownMenuLabel className="p-0">Realtime notifications</DropdownMenuLabel>
-          <div className="flex items-center gap-1">
+          <div className="ml-auto flex items-center gap-1">
             {onViewAll && (
               <Button variant="ghost" size="sm" className="h-7 px-2" onClick={onViewAll}>
                 View all
