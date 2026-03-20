@@ -17,6 +17,7 @@ import { getNotificationPermissionState, requestNotificationPermissionIfNeeded, 
 import { getSubscriptionStatus, registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
 import RealtimeNotificationBell from "@/components/notifications/RealtimeNotificationBell";
 import { usePersistentNotifications } from "@/hooks/usePersistentNotifications";
+import { toPublicNumericId } from "@/lib/utils";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/20 text-warning",
@@ -668,6 +669,8 @@ const SeekerDashboard = () => {
                   const normalizedStatus = normalizeStatus(order.status);
                   const stageIndex = getTimelineStageIndex(order.status);
                   const isLiveTracking = normalizedStatus === "on_the_way";
+                  const displayBookingId = toPublicNumericId(order.id);
+                  const displayServiceId = toPublicNumericId(order.service_id);
                   return (
                   <div key={order.id} className="rounded-xl bg-secondary/30 hover:bg-secondary/50 transition-colors overflow-hidden">
                     <div className="flex items-center justify-between p-4">
@@ -684,6 +687,9 @@ const SeekerDashboard = () => {
                           )}
                         </div>
                         <div className="text-sm text-muted-foreground">{(order.profiles as any)?.name || "Provider"} · {new Date(order.created_at).toLocaleDateString()}</div>
+                        <div className="text-[11px] text-muted-foreground mt-1 font-mono">
+                          Booking ID: {displayBookingId} | Service ID: {displayServiceId}
+                        </div>
                         <div className="mt-2 flex flex-wrap items-center gap-2">
                           {bookingStages.map((stage, idx) => {
                             const isDone = stageIndex >= idx;

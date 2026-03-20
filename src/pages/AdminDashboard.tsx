@@ -187,6 +187,18 @@ export default function AdminDashboard() {
     },
   });
 
+  const { data: supportTickets = [] } = useQuery({
+    queryKey: ["admin-support-tickets"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("support_tickets" as any)
+        .select("id,ticket_code,created_by_role,type,subject,status,priority,booking_id,service_id,created_at")
+        .order("created_at", { ascending: false })
+        .limit(300);
+      return data ?? [];
+    },
+  });
+
   useEffect(() => {
     if (!bookingsError) return;
     toast({
@@ -836,6 +848,67 @@ const handleApproveService = async (id: string) => {
     </div>
   );
 
+  const renderSupport = () => {
+    const seekerTickets = (supportTickets as any[]).filter((t: any) => t.created_by_role === "seeker");
+    const providerTickets = (supportTickets as any[]).filter((t: any) => t.created_by_role === "provider");
+
+    const tableBlock = (title: string, rows: any[]) => (
+      <div className="glass p-6">
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-lg font-semibold">{title}</h2>
+          <span className="text-xs text-muted-foreground">{rows.length} tickets</span>
+        </div>
+
+        {rows.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No tickets found.</p>
+        ) : (
+          <div className="overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left border-b border-border/40">
+                  <th className="py-2 pr-3">Ticket ID</th>
+                  <th className="py-2 pr-3">Type</th>
+                  <th className="py-2 pr-3">Subject</th>
+                  <th className="py-2 pr-3">Service ID</th>
+                  <th className="py-2 pr-3">Booking ID</th>
+                  <th className="py-2 pr-3">Status</th>
+                  <th className="py-2 pr-3">Priority</th>
+                  <th className="py-2 pr-3">Created</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map((ticket: any) => (
+                  <tr key={ticket.id} className="border-b border-border/20 align-top">
+                    <td className="py-2 pr-3 font-mono text-[11px] text-accent">{ticket.ticket_code || ticket.id}</td>
+                    <td className="py-2 pr-3 capitalize">{ticket.type}</td>
+                    <td className="py-2 pr-3 max-w-[220px]">
+                      <p className="line-clamp-2">{ticket.subject}</p>
+                    </td>
+                    <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">{ticket.service_id || "-"}</td>
+                    <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">{ticket.booking_id || "-"}</td>
+                    <td className="py-2 pr-3 capitalize">{ticket.status}</td>
+                    <td className="py-2 pr-3 capitalize">{ticket.priority}</td>
+                    <td className="py-2 pr-3 text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleString()}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+    );
+
+    return (
+      <div className="space-y-4">
+        <p className="text-sm text-muted-foreground">
+          Support tickets are separated by reporter role to help Admin investigate seeker and provider issues independently.
+        </p>
+        {tableBlock("Seeker Support", seekerTickets)}
+        {tableBlock("Provider Support", providerTickets)}
+      </div>
+    );
+  };
+
   return (
     <div className="min-h-screen bg-background admin-dashboard-root">
       <Navbar />
@@ -869,7 +942,7 @@ const handleApproveService = async (id: string) => {
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-3">
-        {["overview", "approvals", "services", "users", "providers", "bookings", "live"].map((tab) => (
+        {["overview", "approvals", "services", "users", "providers", "bookings", "live", "support"].map((tab) => (
           <Button
             key={tab}
             variant={activeTab === tab ? "default" : "outline"}
@@ -892,6 +965,7 @@ const handleApproveService = async (id: string) => {
       {activeTab === "providers" && renderProviders()}
       {activeTab === "bookings" && renderBookings()}
       {activeTab === "live" && renderLiveActivity()}
+      {activeTab === "support" && renderSupport()}
 
       {/* ADD SERVICE MODAL */}
       {showAddService && (

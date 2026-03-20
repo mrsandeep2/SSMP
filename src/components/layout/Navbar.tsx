@@ -31,7 +31,10 @@ const Navbar = () => {
           <Link to="/" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Home</Link>
           <Link to="/#categories" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Services</Link>
           {user && (
-            <Link to={dashboardPath} className="text-sm text-muted-foreground hover:text-foreground transition-colors">{dashboardLabel}</Link>
+            <>
+              <Link to={dashboardPath} className="text-sm text-muted-foreground hover:text-foreground transition-colors">{dashboardLabel}</Link>
+              <Link to="/support" className="text-sm text-muted-foreground hover:text-foreground transition-colors">Support</Link>
+            </>
           )}
         </div>
 
@@ -67,6 +70,7 @@ const Navbar = () => {
           {user ? (
             <>
               <Link to={dashboardPath} className="block text-sm text-muted-foreground hover:text-foreground" onClick={() => setOpen(false)}>{dashboardLabel}</Link>
+              <Link to="/support" className="block text-sm text-muted-foreground hover:text-foreground" onClick={() => setOpen(false)}>Support</Link>
               <Button variant="ghost" size="sm" onClick={() => { handleSignOut(); setOpen(false); }}>Sign Out</Button>
             </>
           ) : (

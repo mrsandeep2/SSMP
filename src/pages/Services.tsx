@@ -25,6 +25,7 @@ import {
   suggestCategory,
   tokenize,
 } from "@/lib/nlpSearch";
+import Seo from "@/components/seo/Seo";
 
 const categoryEmoji: Record<string, string> = {
   "Home Services": "🏠",
@@ -248,6 +249,12 @@ const Services = () => {
 
   return (
     <div className="min-h-screen bg-background services-page-root">
+      <Seo
+        title="All Home Services at One Place | Book Verified Professionals"
+        description="Explore all services including electrician, plumber, cleaning, AC repair, and more. Book trusted experts near you."
+        canonicalPath="/services"
+        keywords={["all home services", "service categories", "book services online"]}
+      />
       <Navbar />
       {/* Voice listening overlay */}
       {isListening && (
