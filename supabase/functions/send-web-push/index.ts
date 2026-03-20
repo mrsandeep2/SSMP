@@ -49,6 +49,22 @@ type StoredSubscription = {
   } | null;
 };
 
+type ProfilePushIdentity = {
+  onesignal_player_id?: string | null;
+};
+
+const uniqueNonEmpty = (values: Array<string | null | undefined>) => {
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const value of values) {
+    const v = String(value || "").trim();
+    if (!v || seen.has(v)) continue;
+    seen.add(v);
+    out.push(v);
+  }
+  return out;
+};
+
 const corsHeaders = {
   "Access-Control-Allow-Origin": "*",
   "Access-Control-Allow-Headers": "authorization, x-client-info, apikey, content-type, x-webhook-secret",
@@ -184,6 +200,7 @@ Deno.serve(async (req) => {
     }
 
     const payload = (await req.json()) as PushEventPayload;
+    const event = payload.event_type;
     const target = buildTarget(payload);
     if (!target) {
       return new Response(JSON.stringify({ ok: true, skipped: true }), {
@@ -210,7 +227,19 @@ Deno.serve(async (req) => {
     const webPushRows = rows.filter((s) => String(s.endpoint || "").startsWith("https://"));
     const nativeRows = rows.filter((s) => String(s.endpoint || "").startsWith("onesignal:"));
 
-    if (webPushRows.length === 0 && nativeRows.length === 0) {
+    const { data: profileIdentity } = await supabaseAdmin
+      .from("profiles")
+      .select("onesignal_player_id")
+      .eq("id", target.userId)
+      .maybeSingle();
+
+    const profilePlayerId = String((profileIdentity as ProfilePushIdentity | null)?.onesignal_player_id || "").trim();
+
+    console.log("EVENT:", event);
+    console.log("TARGET USER:", target.userId);
+    console.log("PLAYER ID:", profilePlayerId || "(none)");
+
+    if (webPushRows.length === 0 && nativeRows.length === 0 && !profilePlayerId) {
       return new Response(JSON.stringify({ ok: true, sent: 0, reason: "no_subscriptions" }), {
         headers: { ...corsHeaders, "Content-Type": "application/json" },
       });
@@ -266,15 +295,41 @@ Deno.serve(async (req) => {
       if (!oneSignalAppId || !oneSignalApiKey) {
         console.warn("onesignal_credentials_missing");
       } else {
-        const includeSubscriptionIds = nativeRows
-          .map((s) => {
+        const includeSubscriptionIds = uniqueNonEmpty(
+          nativeRows.map((s) => {
             const byEndpoint = s.endpoint.startsWith("onesignal:") ? s.endpoint.slice("onesignal:".length) : "";
             const byPayload = s.subscription?.subscription?.id || "";
-            return (byPayload || byEndpoint).trim();
+            return byPayload || byEndpoint;
           })
-          .filter(Boolean);
+        );
 
-        if (includeSubscriptionIds.length > 0) {
+        const includePlayerIds = uniqueNonEmpty([
+          profilePlayerId,
+          ...nativeRows.map((s) => {
+            const byPayload = s.subscription?.subscription?.id || "";
+            const byEndpoint = s.endpoint.startsWith("onesignal:") ? s.endpoint.slice("onesignal:".length) : "";
+            return byPayload || byEndpoint;
+          }),
+        ]);
+
+        const includePlayerIdsLegacy = uniqueNonEmpty(
+          nativeRows.map((s) => {
+            const byPayload = s.subscription?.subscription?.id || "";
+            const byEndpoint = s.endpoint.startsWith("onesignal:") ? s.endpoint.slice("onesignal:".length) : "";
+            return byPayload || byEndpoint;
+          })
+        );
+
+        const externalIds = uniqueNonEmpty([
+          target.userId,
+          ...nativeRows.map((s) => s.subscription?.externalId),
+        ]);
+
+        if (includePlayerIds.length === 0 && includeSubscriptionIds.length === 0 && externalIds.length === 0) {
+          throw new Error("No player_id for target user");
+        }
+
+        if (includeSubscriptionIds.length > 0 || includePlayerIds.length > 0 || externalIds.length > 0) {
           const oneSignalRes = await fetch("https://onesignal.com/api/v1/notifications", {
             method: "POST",
             headers: {
@@ -284,6 +339,10 @@ Deno.serve(async (req) => {
             body: JSON.stringify({
               app_id: oneSignalAppId,
               include_subscription_ids: includeSubscriptionIds,
+              include_player_ids: includePlayerIds,
+              include_external_user_ids: externalIds,
+              include_aliases: externalIds.length > 0 ? { external_id: externalIds } : undefined,
+              target_channel: "push",
               headings: { en: target.title },
               contents: { en: target.body },
               priority: 10,
@@ -300,11 +359,24 @@ Deno.serve(async (req) => {
             }),
           });
 
+          let oneSignalBody: any = null;
+          try {
+            oneSignalBody = await oneSignalRes.json();
+          } catch {
+            oneSignalBody = { parse_error: "non_json_response" };
+          }
+
+          console.log("ONESIGNAL RESPONSE:", oneSignalBody);
+
           if (!oneSignalRes.ok) {
-            const errorText = await oneSignalRes.text();
-            console.error("onesignal_send_failed", errorText);
+            console.error("onesignal_send_failed", oneSignalBody);
           } else {
-            nativeSent = includeSubscriptionIds.length;
+            nativeSent = Math.max(
+              includeSubscriptionIds.length,
+              includePlayerIds.length,
+              includePlayerIdsLegacy.length,
+              externalIds.length
+            );
           }
         }
       }

@@ -1,6 +1,7 @@
 import { createContext, useContext, useEffect, useState, ReactNode } from "react";
 import { supabase } from "@/integrations/supabase/client";
 import type { User, Session } from "@supabase/supabase-js";
+import { saveOneSignalPlayerIdForUser } from "@/lib/pushNotifications";
 
 interface AuthContext {
   user: User | null;
@@ -35,6 +36,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
         setTimeout(() => fetchRole(session.user.id), 0);
+        setTimeout(() => {
+          void saveOneSignalPlayerIdForUser(session.user.id);
+        }, 1200);
       } else {
         setRole(null);
       }
@@ -46,6 +50,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setUser(session?.user ?? null);
       if (session?.user) {
         fetchRole(session.user.id);
+        setTimeout(() => {
+          void saveOneSignalPlayerIdForUser(session.user.id);
+        }, 1200);
       }
       setLoading(false);
     });

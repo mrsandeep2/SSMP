@@ -91,6 +91,26 @@ const getMedianOneSignalInfo = async (bridge: any) => {
   return null;
 };
 
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+const waitForMedianOneSignalInfo = async (bridge: any, attempts = 6, delayMs = 800) => {
+  for (let i = 0; i < attempts; i += 1) {
+    const info = await getMedianOneSignalInfo(bridge);
+    const subId = info?.subscription?.id;
+    const optedOut = info?.subscription?.optedIn === false;
+
+    if (subId && !optedOut) {
+      return info;
+    }
+
+    if (i < attempts - 1) {
+      await wait(delayMs);
+    }
+  }
+
+  return await getMedianOneSignalInfo(bridge);
+};
+
 const upsertNativeBridgeSubscription = async (userId: string, oneSignalInfo: any): Promise<NativeUpsertResult> => {
   const subscriptionId = oneSignalInfo?.subscription?.id;
   if (!subscriptionId) {
@@ -224,7 +244,7 @@ const registerServiceWorker = async () => {
 export const getSubscriptionStatus = async () => {
   const bridge = getMedianBridge();
   if (!hasWebPushSupport() && bridge) {
-    const info = await getMedianOneSignalInfo(bridge);
+    const info = await waitForMedianOneSignalInfo(bridge, 2, 400);
     return {
       supported: true as const,
       isSubscribed: Boolean(info?.subscription?.id && info?.subscription?.optedIn !== false),
@@ -269,7 +289,7 @@ export const subscribeUser = async (): Promise<PushActionResult> => {
       await bridge.login(user.id);
     }
 
-    const info = await getMedianOneSignalInfo(bridge);
+    const info = await waitForMedianOneSignalInfo(bridge, 10, 1000);
     const nativeResult = await upsertNativeBridgeSubscription(user.id, info);
     if (!nativeResult.ok) {
       return { ok: false, message: nativeResult.message || "Native push setup failed in mobile app." };
@@ -376,7 +396,7 @@ export const unsubscribeUser = async (): Promise<PushActionResult> => {
       }
     }
 
-    const info = await getMedianOneSignalInfo(bridge);
+    const info = await waitForMedianOneSignalInfo(bridge, 4, 500);
     const subId = info?.subscription?.id;
     if (subId) {
       await supabase
@@ -423,4 +443,68 @@ export const registerBackgroundPushForCurrentUser = async () => {
     reason: result.ok ? undefined : "subscription_failed",
     message: result.message,
   };
+};
+
+const getOneSignalPlayerIdFromWebSdk = async (): Promise<string | null> => {
+  if (typeof window === "undefined") return null;
+
+  const w = window as any;
+  const oneSignal = w.OneSignal;
+  if (!oneSignal) return null;
+
+  const tryGet = async (): Promise<string | null> => {
+    try {
+      if (typeof oneSignal.getUserId === "function") {
+        const id = await oneSignal.getUserId();
+        return id ? String(id) : null;
+      }
+
+      const v16Id = oneSignal?.User?.PushSubscription?.id;
+      if (v16Id) return String(v16Id);
+    } catch {
+      return null;
+    }
+
+    return null;
+  };
+
+  // OneSignal can be initialized lazily; use push queue if present.
+  if (typeof oneSignal.push === "function") {
+    return await new Promise<string | null>((resolve) => {
+      let settled = false;
+      const done = (value: string | null) => {
+        if (settled) return;
+        settled = true;
+        resolve(value);
+      };
+
+      const timer = window.setTimeout(() => done(null), 4000);
+
+      oneSignal.push(async () => {
+        try {
+          const id = await tryGet();
+          window.clearTimeout(timer);
+          done(id);
+        } catch {
+          window.clearTimeout(timer);
+          done(null);
+        }
+      });
+    });
+  }
+
+  return await tryGet();
+};
+
+export const saveOneSignalPlayerIdForUser = async (userId: string) => {
+  if (!userId) return;
+
+  const playerId = await getOneSignalPlayerIdFromWebSdk();
+  if (!playerId) return;
+
+  // Use "as any" because generated DB types may lag new migration columns.
+  await supabase
+    .from("profiles")
+    .update({ onesignal_player_id: playerId } as any)
+    .eq("id", userId);
 };
