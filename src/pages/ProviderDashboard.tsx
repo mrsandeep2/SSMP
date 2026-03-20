@@ -17,8 +17,7 @@ import { useToast } from "@/hooks/use-toast";
 import { serviceCategories } from "@/data/marketplace";
 import ProviderNavigationMap from "@/components/tracking/ProviderNavigationMap";
 import { getNotificationPermissionState, requestNotificationPermissionIfNeeded, triggerHardNotification } from "@/lib/hardNotifications";
-import { registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
-import PushNotificationButton from "@/components/notifications/PushNotificationButton";
+import { getSubscriptionStatus, registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
 import RealtimeNotificationBell from "@/components/notifications/RealtimeNotificationBell";
 import { usePersistentNotifications } from "@/hooks/usePersistentNotifications";
 import {
@@ -95,6 +94,7 @@ const ProviderDashboard = () => {
   const [paymentUpdatingBookingId, setPaymentUpdatingBookingId] = useState<string | null>(null);
   const [urgentAlerts, setUrgentAlerts] = useState<UrgentProviderAlert[]>([]);
   const [notificationPermission, setNotificationPermission] = useState<"default" | "granted" | "denied" | "unsupported">("default");
+  const [pushEnabled, setPushEnabled] = useState(false);
   const [newService, setNewService] = useState({
     title: "",
     description: "",
@@ -112,28 +112,32 @@ const ProviderDashboard = () => {
   }, [user, loading, navigate]);
 
   useEffect(() => {
-    setNotificationPermission(getNotificationPermissionState());
-  }, []);
+    const refreshNotificationUi = async () => {
+      const permission = getNotificationPermissionState();
+      setNotificationPermission(permission);
 
-  useEffect(() => {
-    if (!user) return;
-    void requestNotificationPermissionIfNeeded().then((permission) => {
-      setNotificationPermission(permission as "default" | "granted" | "denied" | "unsupported");
-      if (permission === "granted") {
-        void registerBackgroundPushForCurrentUser();
+      try {
+        const status = await getSubscriptionStatus();
+        setPushEnabled(Boolean(status.supported && status.isSubscribed));
+      } catch {
+        setPushEnabled(false);
       }
-    });
-  }, [user?.id]);
-
-  useEffect(() => {
-    const refreshPermission = () => setNotificationPermission(getNotificationPermissionState());
-    window.addEventListener("focus", refreshPermission);
-    document.addEventListener("visibilitychange", refreshPermission);
-    return () => {
-      window.removeEventListener("focus", refreshPermission);
-      document.removeEventListener("visibilitychange", refreshPermission);
     };
-  }, []);
+
+    void refreshNotificationUi();
+
+    const onFocus = () => {
+      void refreshNotificationUi();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
+  }, [user?.id]);
 
   // Cleanup GPS watch on unmount
   useEffect(() => {
@@ -259,6 +263,12 @@ const ProviderDashboard = () => {
 
     if (permission === "granted") {
       await registerBackgroundPushForCurrentUser();
+      try {
+        const status = await getSubscriptionStatus();
+        setPushEnabled(Boolean(status.supported && status.isSubscribed));
+      } catch {
+        setPushEnabled(false);
+      }
       toast({
         title: "Notifications enabled",
         description: "You will now receive hard alerts for incoming service requests.",
@@ -275,16 +285,25 @@ const ProviderDashboard = () => {
     }
   };
 
-  const checkNotificationPermission = () => {
+  const checkNotificationPermission = async () => {
     const permission = getNotificationPermissionState();
     setNotificationPermission(permission);
     if (permission === "granted") {
-      void registerBackgroundPushForCurrentUser();
+      await registerBackgroundPushForCurrentUser();
+      try {
+        const status = await getSubscriptionStatus();
+        setPushEnabled(Boolean(status.supported && status.isSubscribed));
+      } catch {
+        setPushEnabled(false);
+      }
       toast({
         title: "Notifications active",
         description: "Hard alerts are now available in this tab.",
       });
+      return;
     }
+
+    setPushEnabled(false);
   };
 
   const { data: profile } = useQuery({
@@ -584,17 +603,17 @@ const ProviderDashboard = () => {
             </div>
           </div>
 
-          {notificationPermission !== "granted" && (
+          {!pushEnabled && (
             <div className="mb-6 rounded-2xl border border-warning/40 bg-warning/10 p-4 md:p-5">
               <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">Enable hard notifications</p>
+                  <p className="text-sm font-semibold text-foreground">Enable notifications</p>
                   <p className="text-sm text-muted-foreground">
                     {notificationPermission === "denied"
                       ? "Browser notifications are blocked. Allow them in site settings, then click Check again."
                       : notificationPermission === "unsupported"
-                        ? "This browser does not support system notifications."
-                        : "Allow notifications to receive sound + system popup for new service hits."}
+                        ? "System notifications are currently disabled in this environment."
+                        : "Turn on notifications to receive booking alerts."}
                   </p>
                 </div>
                 <div className="flex items-center gap-2">
@@ -605,9 +624,6 @@ const ProviderDashboard = () => {
                     <Button variant="outline" size="sm" onClick={checkNotificationPermission}>Check again</Button>
                   )}
                 </div>
-              </div>
-              <div className="mt-3">
-                <PushNotificationButton />
               </div>
             </div>
           )}

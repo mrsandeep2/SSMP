@@ -13,9 +13,8 @@ import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
-import { requestNotificationPermissionIfNeeded, triggerHardNotification } from "@/lib/hardNotifications";
-import { registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
-import PushNotificationButton from "@/components/notifications/PushNotificationButton";
+import { getNotificationPermissionState, requestNotificationPermissionIfNeeded, triggerHardNotification } from "@/lib/hardNotifications";
+import { getSubscriptionStatus, registerBackgroundPushForCurrentUser } from "@/lib/pushNotifications";
 import RealtimeNotificationBell from "@/components/notifications/RealtimeNotificationBell";
 import { usePersistentNotifications } from "@/hooks/usePersistentNotifications";
 
@@ -103,6 +102,8 @@ const SeekerDashboard = () => {
   const [reviewRating, setReviewRating] = useState(5);
   const [reviewComment, setReviewComment] = useState("");
   const [submittingReview, setSubmittingReview] = useState(false);
+  const [notificationPermission, setNotificationPermission] = useState<"default" | "granted" | "denied" | "unsupported">("default");
+  const [pushEnabled, setPushEnabled] = useState(false);
   const handledRealtimeAlertKeysRef = useRef<Set<string>>(new Set());
   const lastKnownBookingStatusRef = useRef<Record<string, string>>({});
   const { unreadNotifications, unreadCount, markRead, markAllRead } = usePersistentNotifications(user?.id);
@@ -112,13 +113,77 @@ const SeekerDashboard = () => {
   }, [user, loading, navigate]);
 
   useEffect(() => {
-    if (!user) return;
-    void requestNotificationPermissionIfNeeded().then((permission) => {
-      if (permission === "granted") {
-        void registerBackgroundPushForCurrentUser();
+    const refreshNotificationUi = async () => {
+      const permission = getNotificationPermissionState();
+      setNotificationPermission(permission);
+
+      try {
+        const status = await getSubscriptionStatus();
+        setPushEnabled(Boolean(status.supported && status.isSubscribed));
+      } catch {
+        setPushEnabled(false);
       }
-    });
+    };
+
+    void refreshNotificationUi();
+
+    const onFocus = () => {
+      void refreshNotificationUi();
+    };
+
+    window.addEventListener("focus", onFocus);
+    document.addEventListener("visibilitychange", onFocus);
+
+    return () => {
+      window.removeEventListener("focus", onFocus);
+      document.removeEventListener("visibilitychange", onFocus);
+    };
   }, [user?.id]);
+
+  const enableNotifications = async () => {
+    const permission = await requestNotificationPermissionIfNeeded();
+    setNotificationPermission(permission as "default" | "granted" | "denied" | "unsupported");
+
+    if (permission === "granted") {
+      await registerBackgroundPushForCurrentUser();
+      try {
+        const status = await getSubscriptionStatus();
+        setPushEnabled(Boolean(status.supported && status.isSubscribed));
+      } catch {
+        setPushEnabled(false);
+      }
+      toast({
+        title: "Notifications enabled",
+        description: "You will receive booking updates even when app is closed.",
+      });
+      return;
+    }
+
+    if (permission === "denied") {
+      toast({
+        title: "Notifications blocked",
+        description: "Enable notifications in browser or app settings, then try again.",
+        variant: "destructive",
+      });
+    }
+  };
+
+  const checkNotificationPermission = async () => {
+    const permission = getNotificationPermissionState();
+    setNotificationPermission(permission);
+    if (permission === "granted") {
+      await registerBackgroundPushForCurrentUser();
+      try {
+        const status = await getSubscriptionStatus();
+        setPushEnabled(Boolean(status.supported && status.isSubscribed));
+      } catch {
+        setPushEnabled(false);
+      }
+      return;
+    }
+
+    setPushEnabled(false);
+  };
 
   const { data: profile } = useQuery({
     queryKey: ["seeker-profile", user?.id],
@@ -517,9 +582,30 @@ const SeekerDashboard = () => {
             </div>
           </div>
 
-          <div className="mb-6">
-            <PushNotificationButton />
-          </div>
+          {!pushEnabled && (
+            <div className="mb-6 rounded-2xl border border-warning/40 bg-warning/10 p-4 md:p-5">
+              <div className="flex flex-col gap-3 md:flex-row md:items-center md:justify-between">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Enable notifications</p>
+                  <p className="text-sm text-muted-foreground">
+                    {notificationPermission === "denied"
+                      ? "Notifications are blocked. Enable them in settings, then click Check again."
+                      : notificationPermission === "unsupported"
+                        ? "System notifications are currently disabled in this environment."
+                        : "Turn on notifications to receive booking updates."}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  {notificationPermission !== "unsupported" && notificationPermission !== "denied" && (
+                    <Button variant="hero" size="sm" onClick={enableNotifications}>Enable notifications</Button>
+                  )}
+                  {notificationPermission !== "unsupported" && (
+                    <Button variant="outline" size="sm" onClick={checkNotificationPermission}>Check again</Button>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
 
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
             {[
