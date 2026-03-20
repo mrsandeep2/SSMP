@@ -1,3 +1,4 @@
+import { useState } from "react";
 import { Bell, CheckCheck, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,13 +40,22 @@ const RealtimeNotificationBell = ({
   onClearAll,
   onViewAll,
 }: RealtimeNotificationBellProps) => {
+  const [open, setOpen] = useState(false);
   const count = unreadCount ?? items.length;
   const orderedItems = [...items].sort(
     (a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime()
   );
 
   return (
-    <DropdownMenu>
+    <>
+      {open && (
+        <div
+          className="fixed inset-0 z-40 bg-background/80 backdrop-blur-[2px]"
+          onClick={() => setOpen(false)}
+          aria-hidden="true"
+        />
+      )}
+      <DropdownMenu open={open} onOpenChange={setOpen}>
       <DropdownMenuTrigger asChild>
         <Button variant="outline" size="icon" className="relative rounded-xl" aria-label="Open notifications">
           <Bell className="h-4 w-4" />
@@ -56,12 +66,20 @@ const RealtimeNotificationBell = ({
           )}
         </Button>
       </DropdownMenuTrigger>
-      <DropdownMenuContent align="end" className="w-[calc(100vw-1rem)] max-w-[380px] p-0">
+      <DropdownMenuContent align="end" className="z-50 w-[calc(100vw-1rem)] max-w-[380px] border border-border bg-popover p-0 shadow-2xl">
         <div className="flex flex-wrap items-center justify-between gap-2 px-3 py-2">
           <DropdownMenuLabel className="p-0">Realtime notifications</DropdownMenuLabel>
           <div className="ml-auto flex items-center gap-1">
             {onViewAll && (
-              <Button variant="ghost" size="sm" className="h-7 px-2" onClick={onViewAll}>
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-7 px-2"
+                onClick={() => {
+                  onViewAll();
+                  setOpen(false);
+                }}
+              >
                 View all
               </Button>
             )}
@@ -81,7 +99,7 @@ const RealtimeNotificationBell = ({
           <div className="max-h-[380px] overflow-y-auto p-2">
             {orderedItems.map((item) => (
               <DropdownMenuItem key={item.id} className="rounded-lg p-0 focus:bg-transparent">
-                <div className="w-full rounded-lg border border-border/60 bg-background/60 px-2.5 py-2">
+                <div className="w-full rounded-lg border border-border/60 bg-background px-2.5 py-2">
                   <div className="flex items-start gap-2">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-start justify-between gap-2">
@@ -109,7 +127,8 @@ const RealtimeNotificationBell = ({
           </div>
         )}
       </DropdownMenuContent>
-    </DropdownMenu>
+      </DropdownMenu>
+    </>
   );
 };
 
