@@ -2,27 +2,45 @@ import { useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { Link, useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Slider } from "@/components/ui/slider";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
-import { MapPin, Search, ArrowRight, Sparkles, Globe, SlidersHorizontal, Star, Mic, MicOff } from "lucide-react";
-import { serviceCategories } from "@/data/marketplace";
+import { Search, ArrowRight, Sparkles, Globe, Mic, MicOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
+import { serviceCategories } from "@/data/marketplace";
+import { suggestCategory, tokenize } from "@/lib/nlpSearch";
+
+type SearchSuggestion = {
+  label: string;
+  query: string;
+  category?: string;
+  count: number;
+  matchSource?: "title" | "category" | "description";
+};
+
+const countWords = (input: string): number =>
+  input
+    .trim()
+    .split(/\s+/)
+    .filter((w) => w.length > 0).length;
+
+const splitRawTerms = (input: string): string[] =>
+  input
+    .trim()
+    .split(/\s+/)
+    .map((t) => t.trim())
+    .filter((t) => t.length >= 2)
+    .slice(0, 8);
+
+const includesAnyTerm = (text: string, terms: string[]) => {
+  const lower = text.toLowerCase();
+  return terms.some((t) => lower.includes(t.toLowerCase()));
+};
 
 const Hero = () => {
   const [searchQuery, setSearchQuery] = useState("");
-  const [selectedCategory, setSelectedCategory] = useState<string | null>(null);
-  const [location, setLocation] = useState("");
-  const [maxPrice, setMaxPrice] = useState(5000);
-  const [minRating, setMinRating] = useState<number>(0);
-  const [hints, setHints] = useState<string[]>([]);
+  const [hints, setHints] = useState<SearchSuggestion[]>([]);
   const [showHints, setShowHints] = useState(false);
+  const [suggestionsLoading, setSuggestionsLoading] = useState(false);
+  const [suggestionsChecked, setSuggestionsChecked] = useState(false);
+  const [availabilityNote, setAvailabilityNote] = useState("");
   const [translating, setTranslating] = useState(false);
   const hintRef = useRef<HTMLDivElement>(null);
   const [isListening, setIsListening] = useState(false);
@@ -50,47 +68,205 @@ const Hero = () => {
     }
   };
 
+  const getAvailableProviderIds = async (): Promise<string[]> => {
+    const { data: availableProviders } = await supabase
+      .from("profiles")
+      .select("id")
+      .or("is_available.is.null,is_available.eq.true");
+
+    return (availableProviders ?? []).map((p: any) => p.id);
+  };
+
+  const fetchSearchableServices = async (providerIds: string[], category?: string) => {
+    if (providerIds.length === 0) return [] as any[];
+
+    let query = supabase
+      .from("services")
+      .select("title, category, description")
+      .eq("approval_status", "approved")
+      .or("is_active.is.null,is_active.eq.true")
+      .in("provider_id", providerIds)
+      .limit(150);
+
+    if (category) query = query.eq("category", category);
+
+    const { data } = await query;
+    return data ?? [];
+  };
+
+  const countAvailableServices = async (query: string, category?: string): Promise<number> => {
+    const availableProviderIds = await getAvailableProviderIds();
+    if (availableProviderIds.length === 0) return 0;
+
+    const services = await fetchSearchableServices(availableProviderIds, category);
+    const tokens = tokenize(query);
+    const rawTerms = splitRawTerms(query);
+    const terms = Array.from(new Set([...(tokens.length ? tokens : []), ...rawTerms]));
+    const effectiveTerms = terms.length ? terms : [query.trim()];
+
+    return services.filter((s: any) => {
+      const title = String(s?.title ?? "");
+      const cat = String(s?.category ?? "");
+      const desc = String(s?.description ?? "");
+      return (
+        includesAnyTerm(title, effectiveTerms) ||
+        includesAnyTerm(cat, effectiveTerms) ||
+        includesAnyTerm(desc, effectiveTerms)
+      );
+    }).length;
+  };
+
   useEffect(() => {
-    if (searchQuery.length >= 1) {
+    const words = countWords(searchQuery);
+    if (words >= 1) {
       const t = setTimeout(async () => {
+        setSuggestionsLoading(true);
+        setSuggestionsChecked(false);
+        setAvailabilityNote("");
         const translated = await translateQuery(searchQuery);
-        const { data: availableProviders } = await supabase
-          .from("profiles")
-          .select("id")
-          .or("is_available.is.null,is_available.eq.true");
-        const availableProviderIds = (availableProviders ?? []).map((p: any) => p.id);
+        const availableProviderIds = await getAvailableProviderIds();
 
         if (availableProviderIds.length === 0) {
           setHints([]);
-          setShowHints(false);
+          setShowHints(true);
+          setSuggestionsLoading(false);
+          setSuggestionsChecked(true);
           return;
         }
 
-        const { data } = await supabase
-          .from("services")
-          .select("title, category")
-          .eq("approval_status", "approved")
-          .or("is_active.is.null,is_active.eq.true")
-          .in("provider_id", availableProviderIds)
-          .or(`title.ilike.%${translated}%,category.ilike.%${translated}%`)
-          .limit(5);
-        const h = new Set<string>();
+        const inferredCategory = suggestCategory(translated, serviceCategories);
+        const searchTokens = tokenize(translated);
+        const rawTerms = splitRawTerms(translated);
+        const originalRawTerms = splitRawTerms(searchQuery);
+        const terms = Array.from(
+          new Set([...(searchTokens.length ? searchTokens : []), ...rawTerms, ...originalRawTerms])
+        );
+        const effectiveTerms = terms.length ? terms : [translated.trim()];
+
+        let data: any[] = [];
+        try {
+          const source = await fetchSearchableServices(availableProviderIds);
+          data = source.filter((s: any) => {
+            const title = String(s?.title ?? "");
+            const category = String(s?.category ?? "");
+            const description = String(s?.description ?? "");
+            return (
+              includesAnyTerm(title, effectiveTerms) ||
+              includesAnyTerm(category, effectiveTerms) ||
+              includesAnyTerm(description, effectiveTerms)
+            );
+          });
+        } catch {
+          data = [];
+        }
+
+        const titleCounts = new Map<string, number>();
+        const categoryCounts = new Map<string, number>();
+        const descriptionCounts = new Map<string, number>();
         (data ?? []).forEach((s: any) => {
-          if (s.title.toLowerCase().includes(translated.toLowerCase())) h.add(s.title);
-          if (s.category.toLowerCase().includes(translated.toLowerCase())) h.add(s.category);
+          const title = String(s?.title ?? "").trim();
+          const category = String(s?.category ?? "").trim();
+          const description = String(s?.description ?? "").trim();
+
+          const titleOrCategoryMatch = includesAnyTerm(title, effectiveTerms) || includesAnyTerm(category, effectiveTerms);
+          const descriptionMatch = includesAnyTerm(description, effectiveTerms);
+
+          if (s?.title) {
+            titleCounts.set(title, (titleCounts.get(title) ?? 0) + 1);
+          }
+          if (s?.category) {
+            categoryCounts.set(category, (categoryCounts.get(category) ?? 0) + 1);
+          }
+
+          // Explicitly track services that matched by description words.
+          if (descriptionMatch && !titleOrCategoryMatch && title) {
+            descriptionCounts.set(title, (descriptionCounts.get(title) ?? 0) + 1);
+          }
         });
-        // Also add category matches from local data
-        serviceCategories.forEach(c => {
-          if (c.name.toLowerCase().includes(translated.toLowerCase())) h.add(c.name);
+
+        const suggestions: SearchSuggestion[] = [];
+
+        // Prioritize exact title matches
+        const exactTitleMatches = data.filter((s: any) => {
+          const title = String(s?.title ?? "").trim().toLowerCase();
+          return title === translated.trim().toLowerCase();
         });
-        const arr = Array.from(h).slice(0, 6);
+
+        if (exactTitleMatches.length > 0) {
+          suggestions.push({
+            label: `Exact match: ${exactTitleMatches[0].title} (${exactTitleMatches.length})`,
+            query: exactTitleMatches[0].title,
+            count: exactTitleMatches.length,
+            matchSource: "title",
+          });
+        }
+
+        if (inferredCategory) {
+          const count = categoryCounts.get(inferredCategory) ?? 0;
+          if (count > 0 && !suggestions.some(s => s.category === inferredCategory)) {
+            suggestions.push({
+              label: `${inferredCategory} (${count})`,
+              query: translated,
+              category: inferredCategory,
+              count,
+              matchSource: "category",
+            });
+          }
+        }
+
+        // Add title matches (excluding exact matches already added)
+        for (const [title, count] of Array.from(titleCounts.entries()).sort((a, b) => b[1] - a[1])) {
+          if (suggestions.some(s => s.query.toLowerCase() === title.toLowerCase())) continue;
+          suggestions.push({ 
+            label: `${title} (${count})`, 
+            query: title, 
+            count, 
+            matchSource: "title" 
+          });
+          if (suggestions.length >= 6) break;
+        }
+
+        // Add description matches if still need more suggestions
+        if (suggestions.length < 6) {
+          for (const [title, count] of Array.from(descriptionCounts.entries()).sort((a, b) => b[1] - a[1])) {
+            if (suggestions.some((s) => s.query.toLowerCase() === title.toLowerCase())) continue;
+            suggestions.push({
+              label: `${title} (desc match ${count})`,
+              query: title,
+              count,
+              matchSource: "description",
+            });
+            if (suggestions.length >= 6) break;
+          }
+        }
+
+        // Add category matches if still need more suggestions
+        if (suggestions.length < 6) {
+          for (const [category, count] of Array.from(categoryCounts.entries()).sort((a, b) => b[1] - a[1])) {
+            if (suggestions.some((s) => s.category === category)) continue;
+            suggestions.push({
+              label: `${category} (${count})`,
+              query: translated,
+              category,
+              count,
+              matchSource: "category",
+            });
+            if (suggestions.length >= 6) break;
+          }
+        }
+
+        const arr = suggestions.slice(0, 6);
         setHints(arr);
-        setShowHints(arr.length > 0);
+        setShowHints(true);
+        setSuggestionsLoading(false);
+        setSuggestionsChecked(true);
       }, 300);
       return () => clearTimeout(t);
     } else {
       setHints([]);
       setShowHints(false);
+      setSuggestionsLoading(false);
+      setSuggestionsChecked(false);
     }
   }, [searchQuery]);
 
@@ -164,23 +340,39 @@ const Hero = () => {
   };
 
   const handleSearch = async () => {
-    const translated = await translateQuery(searchQuery);
+    setAvailabilityNote("");
+    const translated = (await translateQuery(searchQuery)).trim();
+    if (!translated) return;
     const params = new URLSearchParams();
-    if (translated) params.set("q", translated);
-    // Only filter by category if user explicitly selected one.
-    if (selectedCategory) params.set("cat", selectedCategory);
-    if (location) params.set("loc", location);
-    if (Number.isFinite(maxPrice)) params.set("max", String(maxPrice));
-    if (minRating > 0) params.set("rating", String(minRating));
+    params.set("q", translated);
     navigate(`/services?${params.toString()}`);
   };
 
-  const selectHint = (h: string) => {
-    setSearchQuery(h);
+  const selectHint = async (suggestion: SearchSuggestion) => {
+    const chosenQuery = suggestion.query || searchQuery;
+    setSearchQuery(chosenQuery);
     setShowHints(false);
+
+    // Show loading state while checking availability
+    setAvailabilityNote("Checking service availability...");
+
+    const availableCount = await countAvailableServices(chosenQuery, suggestion.category);
+    if (availableCount <= 0) {
+      setAvailabilityNote(`No services available for "${suggestion.label}" right now. Try a different search.`);
+      return;
+    }
+
+    setAvailabilityNote(`Found ${availableCount} service${availableCount > 1 ? 's' : ''} matching your search!`);
+
     const params = new URLSearchParams();
-    params.set("q", h);
-    navigate(`/services?${params.toString()}`);
+    params.set("q", chosenQuery);
+    if (suggestion.category) params.set("cat", suggestion.category);
+    if (suggestion.matchSource) params.set("src", suggestion.matchSource);
+    
+    // Small delay to show the success message before navigation
+    setTimeout(() => {
+      navigate(`/services?${params.toString()}`);
+    }, 500);
   };
 
   return (
@@ -249,9 +441,12 @@ const Hero = () => {
                 <Search className="w-5 h-5 text-muted-foreground" />
                 <input
                   type="text"
-                  placeholder="Search in any language... e.g. 'khana banane wali chahiye'"
+                  placeholder="Search in any language... e.g. 'electrician', 'plumbing near me'"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => {
+                    setSearchQuery(e.target.value);
+                    setAvailabilityNote("");
+                  }}
                   onKeyDown={(e) => e.key === "Enter" && handleSearch()}
                   onFocus={() => hints.length > 0 && setShowHints(true)}
                   className="w-full bg-transparent border-none outline-none text-foreground placeholder:text-muted-foreground py-3"
@@ -278,103 +473,41 @@ const Hero = () => {
             </div>
             {showHints && (
               <div className="absolute z-50 w-full mt-1 glass rounded-xl overflow-hidden shadow-lg">
-                {hints.map((h) => (
-                  <button
-                    key={h}
-                    onClick={() => selectHint(h)}
-                    className="w-full text-left px-5 py-3 text-sm text-foreground hover:bg-primary/10 transition-colors flex items-center gap-3"
-                  >
-                    <Search className="w-3.5 h-3.5 text-muted-foreground" />
-                    {h}
-                  </button>
-                ))}
+                {hints.length > 0 ? (
+                  hints.map((h) => (
+                    <button
+                      key={`${h.label}-${h.query}-${h.category ?? "none"}`}
+                      onClick={() => selectHint(h)}
+                      className="w-full text-left px-5 py-3 text-sm text-foreground hover:bg-primary/10 transition-colors flex items-center gap-3 border-b last:border-b-0 border-border/20"
+                    >
+                      <Search className="w-3.5 h-3.5 text-muted-foreground flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <div className="font-medium">{h.label}</div>
+                        {h.matchSource === "description" && (
+                          <div className="text-xs text-muted-foreground">Matched from description</div>
+                        )}
+                        {h.matchSource === "title" && h.label.includes("Exact match") && (
+                          <div className="text-xs text-emerald-600">Perfect match</div>
+                        )}
+                      </div>
+                      <div className="text-xs text-muted-foreground bg-accent/20 px-2 py-1 rounded-full">
+                        {h.count}
+                      </div>
+                    </button>
+                  ))
+                ) : suggestionsChecked && !suggestionsLoading ? (
+                  <div className="px-5 py-3 text-sm text-muted-foreground">No suggestions found</div>
+                ) : null}
               </div>
             )}
-          </motion.div>
-
-          {/* Filters row (replaces old hardcoded category pills) */}
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.7, duration: 0.6 }}
-            className="max-w-4xl mx-auto mb-8"
-          >
-            <div className="glass rounded-2xl p-4 flex flex-col md:flex-row gap-3 md:items-center">
-              <div className="flex-1 min-w-[180px]">
-                <Select
-                  value={selectedCategory ?? "all"}
-                  onValueChange={(v) => setSelectedCategory(v === "all" ? null : v)}
-                >
-                  <SelectTrigger className="bg-secondary/30 border-border rounded-xl h-11">
-                    <SelectValue placeholder="Category" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">All Categories</SelectItem>
-                    {serviceCategories.map((c) => (
-                      <SelectItem key={c.id} value={c.name}>
-                        {c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+            {!showHints && suggestionsLoading && countWords(searchQuery) >= 1 ? (
+              <div className="absolute z-50 w-full mt-1 glass rounded-xl px-5 py-3 text-sm text-muted-foreground shadow-lg">
+                Finding suggestions...
               </div>
-
-              <div className="flex-1 min-w-[200px]">
-                <div className="flex items-center gap-2 rounded-xl bg-secondary/30 border border-border px-3 h-11">
-                  <MapPin className="w-4 h-4 text-muted-foreground" />
-                  <Input
-                    value={location}
-                    onChange={(e) => setLocation(e.target.value)}
-                    placeholder="Location (optional)"
-                    className="border-none bg-transparent shadow-none focus-visible:ring-0 p-0 h-auto"
-                  />
-                </div>
-              </div>
-
-              <div className="flex-[1.2] min-w-[240px]">
-                <div className="flex items-center gap-3 rounded-xl bg-secondary/30 border border-border px-3 h-11">
-                  <SlidersHorizontal className="w-4 h-4 text-muted-foreground" />
-                  <span className="text-xs text-muted-foreground whitespace-nowrap">
-                    Max ₹{maxPrice}
-                  </span>
-                  <div className="flex-1">
-                    <Slider
-                      value={[maxPrice]}
-                      min={0}
-                      max={20000}
-                      step={100}
-                      onValueChange={(v) => setMaxPrice(v[0] ?? 0)}
-                    />
-                  </div>
-                </div>
-              </div>
-
-              <div className="flex-1 min-w-[170px]">
-                <Select value={String(minRating)} onValueChange={(v) => setMinRating(Number(v))}>
-                  <SelectTrigger className="bg-secondary/30 border-border rounded-xl h-11">
-                    <SelectValue placeholder="All Ratings" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="0">All Ratings</SelectItem>
-                    <SelectItem value="3">
-                      <span className="inline-flex items-center gap-2">
-                        <Star className="w-4 h-4 text-warning fill-warning" /> 3+ stars
-                      </span>
-                    </SelectItem>
-                    <SelectItem value="4">
-                      <span className="inline-flex items-center gap-2">
-                        <Star className="w-4 h-4 text-warning fill-warning" /> 4+ stars
-                      </span>
-                    </SelectItem>
-                    <SelectItem value="5">
-                      <span className="inline-flex items-center gap-2">
-                        <Star className="w-4 h-4 text-warning fill-warning" /> 5 stars
-                      </span>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
+            ) : null}
+            {availabilityNote ? (
+              <p className="text-sm text-warning mt-2">{availabilityNote}</p>
+            ) : null}
           </motion.div>
 
           <motion.div

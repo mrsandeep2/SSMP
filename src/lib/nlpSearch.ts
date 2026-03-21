@@ -34,27 +34,61 @@ const CATEGORY_SYNONYMS: Record<string, string> = {
   "surveillance": "Security Services",
   "guard": "Security Services",
   "bodyguard": "Security Services",
+  "security guard": "Security Services",
   "it support": "Technical Services",
   "computer repair": "Technical Services",
   "laptop repair": "Technical Services",
   "mobile repair": "Technical Services",
+  "phone repair": "Technical Services",
+  "software issue": "Technical Services",
+  "hardware repair": "Technical Services",
   "plumber": "Home Services",
+  "plumbing": "Home Services",
   "electrician": "Home Services",
+  "electrical work": "Home Services",
   "ac repair": "Repair & Maintenance",
+  "air conditioner": "Repair & Maintenance",
   "appliance repair": "Repair & Maintenance",
+  "fridge repair": "Repair & Maintenance",
+  "washing machine": "Repair & Maintenance",
+  "home repair": "Repair & Maintenance",
   "tuition": "Education & Tutoring",
   "tutor": "Education & Tutoring",
+  "teacher": "Education & Tutoring",
+  "coaching": "Education & Tutoring",
+  "study help": "Education & Tutoring",
   "moving": "Delivery & Logistics",
   "courier": "Delivery & Logistics",
+  "delivery": "Delivery & Logistics",
+  "transport": "Delivery & Logistics",
+  "packers": "Delivery & Logistics",
   "fitness": "Health & Personal Care",
+  "gym": "Health & Personal Care",
   "salon": "Health & Personal Care",
+  "beauty": "Health & Personal Care",
+  "spa": "Health & Personal Care",
+  "massage": "Health & Personal Care",
   "consulting": "Business & Consulting",
   "legal": "Business & Consulting",
   "accounting": "Business & Consulting",
+  "business advice": "Business & Consulting",
+  "financial": "Business & Consulting",
   "photography": "Event & Media",
   "dj": "Event & Media",
+  "event": "Event & Media",
+  "party": "Event & Media",
+  "music": "Event & Media",
+  "video": "Event & Media",
   "ai": "AI & Automation",
   "automation": "AI & Automation",
+  "machine learning": "AI & Automation",
+  "chatbot": "AI & Automation",
+  "cleaning": "Home Services",
+  "house cleaning": "Home Services",
+  "carpenter": "Home Services",
+  "wood work": "Home Services",
+  "painting": "Home Services",
+  "home painting": "Home Services",
 };
 
 export function normalizeText(input: string): string {
@@ -137,17 +171,46 @@ export function scoreServiceMatch(service: any, query: string, tokens: string[])
 
   let score = 0;
   const normQ = normalizeText(query);
-  if (normQ && (title.includes(normQ) || cat.includes(normQ))) score += 6;
+  
+  // Exact title match gets highest score
+  if (normQ && title === normQ) score += 20;
+  else if (normQ && (title.includes(normQ) || cat.includes(normQ))) score += 8;
+  
+  // Category match bonus
+  if (normQ && cat === normQ) score += 15;
+  else if (normQ && cat.includes(normQ)) score += 6;
 
+  // Token-based scoring
   for (const t of tokens) {
     if (title.includes(t)) score += 4;
     if (cat.includes(t)) score += 3;
     if (desc.includes(t)) score += 2;
   }
 
-  const rating = Number(service?.rating ?? 0);
-  if (Number.isFinite(rating)) score += Math.min(5, rating) * 0.3;
+  // Only add rating bonus if there's some content match
+  if (score > 0) {
+    // Rating bonus (capped at 5)
+    const rating = Number(service?.rating ?? 0);
+    if (Number.isFinite(rating)) score += Math.min(5, rating) * 0.3;
+
+    // Description length bonus (more detailed descriptions might be better)
+    if (desc.length > 50) score += 0.1;
+  }
 
   return score;
+}
+
+export function findBestMatches(services: any[], query: string, limit: number = 10): any[] {
+  const tokens = tokenize(query);
+  const scored = services.map(service => ({
+    service,
+    score: scoreServiceMatch(service, query, tokens)
+  }));
+  
+  return scored
+    .sort((a, b) => b.score - a.score)
+    .filter(item => item.score > 0) // Only return matches with positive scores
+    .slice(0, limit)
+    .map(item => item.service);
 }
 

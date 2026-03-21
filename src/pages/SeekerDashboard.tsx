@@ -492,21 +492,97 @@ const SeekerDashboard = () => {
     if (!user) return;
     setPayingBookingId(bookingId);
 
-    const { error } = await supabase
-      .from("bookings")
-      .update({ payment_status: "requested", payment_method: method } as any)
-      .eq("id", bookingId)
-      .eq("seeker_id", user.id);
+    try {
+      // For cash payment, mark as paid immediately
+      if (method === "cash") {
+        const { error } = await supabase
+          .from("bookings")
+          .update({ 
+            payment_status: "paid", 
+            payment_method: "cash",
+            paid_at: new Date().toISOString()
+          } as any)
+          .eq("id", bookingId)
+          .eq("seeker_id", user.id);
 
-    setPayingBookingId(null);
+        if (error) {
+          throw error;
+        }
 
-    if (error) {
-      toast({ title: "Payment update failed", description: error.message, variant: "destructive" });
-      return;
+        toast({ 
+          title: "Payment Completed", 
+          description: "Cash payment recorded. Service provider has been notified." 
+        });
+        
+        // Show review prompt after payment
+        setTimeout(() => {
+          setReviewingBookingId(bookingId);
+          setReviewRating(5);
+          setReviewComment("");
+        }, 2000);
+      } 
+      // For UPI payment, initiate payment flow
+      else if (method === "upi") {
+        const { error } = await supabase
+          .from("bookings")
+          .update({ 
+            payment_status: "requested", 
+            payment_method: "upi"
+          } as any)
+          .eq("id", bookingId)
+          .eq("seeker_id", user.id);
+
+        if (error) {
+          throw error;
+        }
+
+        // Show UPI payment modal/redirect
+        toast({ 
+          title: "Initiating UPI Payment", 
+          description: "Please complete the payment on your UPI app." 
+        });
+        
+        // Here you would integrate with actual UPI gateway
+        // For demo, we'll simulate payment completion after 3 seconds
+        setTimeout(async () => {
+          const { error: paymentError } = await supabase
+            .from("bookings")
+            .update({ 
+              payment_status: "paid",
+              payment_method: "upi", 
+              paid_at: new Date().toISOString()
+            } as any)
+            .eq("id", bookingId)
+            .eq("seeker_id", user.id);
+
+          if (!paymentError) {
+            toast({ 
+              title: "UPI Payment Successful", 
+              description: "Payment completed successfully!" 
+            });
+            queryClient.invalidateQueries({ queryKey: ["my-bookings", user.id] });
+            
+            // Show review prompt after payment
+            setTimeout(() => {
+              setReviewingBookingId(bookingId);
+              setReviewRating(5);
+              setReviewComment("");
+            }, 2000);
+          }
+        }, 3000);
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["my-bookings", user.id] });
+      
+    } catch (error: any) {
+      toast({ 
+        title: "Payment Failed", 
+        description: error.message || "Payment could not be processed. Please try again.", 
+        variant: "destructive" 
+      });
+    } finally {
+      setPayingBookingId(null);
     }
-
-    toast({ title: "Payment requested", description: "Provider will now confirm payment receipt." });
-    queryClient.invalidateQueries({ queryKey: ["my-bookings", user.id] });
   };
 
   const submitReview = async () => {
@@ -745,7 +821,17 @@ const SeekerDashboard = () => {
                               disabled={payingBookingId === order.id}
                               onClick={() => requestPayment(order.id, order.status, "upi")}
                             >
-                              {payingBookingId === order.id ? "Processing..." : "Pay by UPI"}
+                              {payingBookingId === order.id ? (
+                                <>
+                                  <div className="w-3 h-3 border-2 border-white/30 border-t-transparent border-r-transparent animate-spin rounded-full mr-2"></div>
+                                  Processing...
+                                </>
+                              ) : (
+                                <>
+                                  <div className="w-3 h-3 bg-success rounded-full mr-1"></div>
+                                  Pay with UPI
+                                </>
+                              )}
                             </Button>
                             <Button
                               size="sm"
@@ -753,7 +839,17 @@ const SeekerDashboard = () => {
                               disabled={payingBookingId === order.id}
                               onClick={() => requestPayment(order.id, order.status, "cash")}
                             >
-                              Cash
+                              {payingBookingId === order.id ? (
+                                <>
+                                  <div className="w-3 h-3 border-2 border-white/30 border-t-transparent border-r-transparent animate-spin rounded-full mr-2"></div>
+                                  Processing...
+                                </>
+                              ) : (
+                                <>
+                                  <div className="w-3 h-3 bg-warning rounded-full mr-1"></div>
+                                  Pay Cash
+                                </>
+                              )}
                             </Button>
                           </div>
                         )}
