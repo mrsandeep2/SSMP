@@ -254,13 +254,20 @@ const SeekerDashboard = () => {
     queryFn: async () => {
       const { data } = await supabase
         .from("reviews")
-        .select("booking_id")
+        .select("booking_id, rating")
         .eq("seeker_id", user!.id);
       return data ?? [];
     },
     enabled: !!user,
   });
-  const reviewedSet = new Set((myReviews as any[]).map((r) => r.booking_id));
+  const reviewByBooking = new Map(
+    (myReviews as any[]).map((r) => [r.booking_id, Number(r.rating || 0)])
+  );
+  const reviewedSet = new Set(reviewByBooking.keys());
+  const myRatedCount = (myReviews as any[]).length;
+  const myAverageGivenRating = myRatedCount
+    ? (myReviews as any[]).reduce((sum, r: any) => sum + Number(r.rating || 0), 0) / myRatedCount
+    : 0;
 
   useEffect(() => {
     const nextStatusMap: Record<string, string> = {};
@@ -608,6 +615,7 @@ const SeekerDashboard = () => {
     setReviewRating(5);
     setReviewComment("");
     queryClient.invalidateQueries({ queryKey: ["my-reviews", user.id] });
+    queryClient.invalidateQueries({ queryKey: ["services"] });
   };
 
   if (loading) return <div className="min-h-screen bg-background flex items-center justify-center"><span className="text-muted-foreground">Loading...</span></div>;
@@ -684,12 +692,17 @@ const SeekerDashboard = () => {
             </div>
           )}
 
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-4 mb-8">
             {[
               { label: "Active Orders", value: String(active), icon: ShoppingBag },
               { label: "Completed", value: String(completed), icon: Clock },
               { label: "Total Orders", value: String(bookings.length), icon: Star },
               { label: "Total Spent", value: `₹${totalSpent.toLocaleString("en-IN")}`, icon: IndianRupee },
+              {
+                label: "My Ratings",
+                value: myRatedCount > 0 ? `${myAverageGivenRating.toFixed(1)}★ (${myRatedCount})` : "0.0★ (0)",
+                icon: Star,
+              },
             ].map((stat) => {
               const Icon = stat.icon;
               return (
@@ -865,7 +878,19 @@ const SeekerDashboard = () => {
                         )}
                         {normalizedStatus === "completed" && reviewedSet.has(order.id) && (
                           <span className="text-xs text-muted-foreground flex items-center gap-1">
-                            <Star className="w-3 h-3 text-amber-400 fill-amber-400" /> Reviewed
+                            <span className="flex items-center gap-0.5">
+                              {[1, 2, 3, 4, 5].map((star) => {
+                                const myRating = Number(reviewByBooking.get(order.id) || 0);
+                                return (
+                                  <Star
+                                    key={`${order.id}-my-rating-${star}`}
+                                    className={`w-3 h-3 ${star <= myRating ? "text-amber-400" : "text-muted-foreground"}`}
+                                    fill={star <= myRating ? "currentColor" : "none"}
+                                  />
+                                );
+                              })}
+                            </span>
+                            <span>You rated {Number(reviewByBooking.get(order.id) || 0)}★</span>
                           </span>
                         )}
                         <span className="font-display font-semibold text-foreground">₹{order.amount}</span>

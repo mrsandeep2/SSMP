@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
   IndianRupee, CheckCircle, Clock, Plus, X, Package, ToggleLeft, ToggleRight,
-  User, Mail, Save, Home
+  User, Mail, Save, Home, Star, HelpCircle
 } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
@@ -346,11 +346,55 @@ const ProviderDashboard = () => {
     enabled: !!user,
   });
 
+  const { data: serviceReviews = [] } = useQuery({
+    queryKey: ["provider-service-reviews", user?.id],
+    queryFn: async () => {
+      const { data: reviewsData, error } = await supabase
+        .from("reviews")
+        .select("id, booking_id, service_id, seeker_id, rating, comment, created_at")
+        .eq("provider_id", user!.id)
+        .order("created_at", { ascending: false })
+        .limit(300);
+
+      if (error) throw error;
+
+      const reviews = reviewsData ?? [];
+      const seekerIds = Array.from(new Set(reviews.map((r: any) => r.seeker_id).filter(Boolean)));
+
+      let seekerNameById = new Map<string, string>();
+      if (seekerIds.length > 0) {
+        const { data: seekers } = await supabase
+          .from("profiles")
+          .select("id, name")
+          .in("id", seekerIds);
+        seekerNameById = new Map((seekers ?? []).map((s: any) => [String(s.id), String(s.name || "Customer")]));
+      }
+
+      return reviews.map((r: any) => ({
+        ...r,
+        seeker_name: seekerNameById.get(String(r.seeker_id)) || "Customer",
+      }));
+    },
+    enabled: !!user,
+  });
+
+  const reviewByBookingId = new Map(
+    (serviceReviews as any[])
+      .filter((r: any) => r.booking_id)
+      .map((r: any) => [String(r.booking_id), r])
+  );
+
   const completedCount = bookings.filter((b: any) => b.status === "completed").length;
   const totalEarnings = bookings
     .filter((b: any) => b.status === "completed")
     .reduce((sum: number, b: any) => sum + Number(b.provider_earnings ?? Number(b.amount) * 0.85), 0);
   const pendingCount = bookings.filter((b: any) => b.status === "pending").length;
+  const totalRatings = services.reduce((sum: number, s: any) => sum + Number(s.review_count || 0), 0);
+  const weightedRatingSum = services.reduce(
+    (sum: number, s: any) => sum + Number(s.rating || 0) * Number(s.review_count || 0),
+    0
+  );
+  const averageProviderRating = totalRatings > 0 ? weightedRatingSum / totalRatings : 0;
 
   const toggleAvailability = async () => {
     if (!user) return;
@@ -391,7 +435,14 @@ const ProviderDashboard = () => {
     // Optimistic update: update cache immediately for snappy UI
     const providerKey = ["provider-bookings", user?.id];
     const previousProvider = queryClient.getQueryData<any[]>(providerKey);
+    const shouldStartTracking = status === "on_the_way";
     setUpdatingBookingId(id);
+
+    // Start GPS tracking immediately for responsive UX when provider marks on_the_way.
+    if (shouldStartTracking) {
+      startLocationBroadcast(id);
+    }
+
     try {
       // locally update provider-bookings cache
       queryClient.setQueryData(providerKey, (old: any[] | undefined) =>
@@ -406,15 +457,17 @@ const ProviderDashboard = () => {
         );
       });
 
-      const { error } = await supabase.from("bookings").update(updateData).eq("id", id);
+      const { error } = await supabase
+        .from("bookings")
+        .update(updateData)
+        .eq("id", id)
+        .eq("provider_id", user?.id as string);
       if (error) throw error;
 
       console.log(`✅ Booking ${id} updated to ${status}`);
 
       // GPS tracking lifecycle
-      if (status === "on_the_way") {
-        startLocationBroadcast(id);
-      } else if (["arrived", "started", "completed", "cancelled"].includes(status)) {
+      if (["arrived", "started", "completed", "cancelled"].includes(status)) {
         stopLocationBroadcast();
       }
 
@@ -426,6 +479,9 @@ const ProviderDashboard = () => {
     } catch (err: any) {
       // rollback
       if (previousProvider) queryClient.setQueryData(providerKey, previousProvider);
+      if (shouldStartTracking) {
+        stopLocationBroadcast();
+      }
       toast({ title: "Error", description: err.message, variant: "destructive" });
     } finally {
       setUpdatingBookingId(null);
@@ -575,6 +631,9 @@ const ProviderDashboard = () => {
               <Button variant="outline" size="sm" className="flex-1 rounded-lg sm:flex-none" onClick={() => navigate("/")}>
                 <Home className="w-4 h-4 mr-1" /> Back to Home
               </Button>
+              <Button variant="ghost" size="sm" className="flex-1 rounded-lg sm:flex-none" onClick={() => navigate("/support")}>
+                <HelpCircle className="w-4 h-4 mr-1" /> Support
+              </Button>
               <Button variant="ghost" size="sm" className="flex-1 rounded-lg sm:flex-none" onClick={() => setShowEditProfile(true)}>
                 <User className="w-4 h-4 mr-1" /> Edit Profile
               </Button>
@@ -661,17 +720,27 @@ const ProviderDashboard = () => {
           )}
 
           {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
+          <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
             {[
               { label: "Total Earnings", value: `₹${totalEarnings.toLocaleString("en-IN")}`, icon: IndianRupee },
               { label: "Completed Jobs", value: String(completedCount), icon: CheckCircle },
               { label: "Active Services", value: String(services.filter((s: any) => s.is_active && s.approval_status === "approved").length), icon: Package },
               { label: "Pending Bookings", value: String(pendingCount), icon: Clock },
+              {
+                label: "Avg Rating",
+                value: totalRatings > 0 ? `${averageProviderRating.toFixed(1)}★` : "New",
+                icon: Star,
+              },
+              {
+                label: "Total Ratings",
+                value: String(totalRatings),
+                icon: Star,
+              },
             ].map((stat) => {
               const Icon = stat.icon;
               return (
                 <div key={stat.label} className="glass glass-hover rounded-2xl p-5">
-                  <Icon className="w-5 h-5 text-accent mb-3" />
+                  <Icon className={`w-5 h-5 mb-3 ${stat.label.toLowerCase().includes("rating") ? "text-yellow-400" : "text-accent"}`} />
                   <div className="text-2xl font-bold font-display text-foreground">{stat.value}</div>
                   <div className="text-sm text-muted-foreground">{stat.label}</div>
                 </div>
@@ -694,13 +763,15 @@ const ProviderDashboard = () => {
                         <div className="text-sm text-muted-foreground">
                           {b.seeker_name || "Customer"} · {b.scheduled_date || "No date"}
                         </div>
-                        {(normalizeStatus(b.status) === "accepted" || normalizeStatus(b.status) === "on_the_way") ? (
+                        {normalizeStatus(b.status) === "on_the_way" ? (
                           <div className="text-xs text-muted-foreground mt-1 truncate">
                             📍 {(b as any).booking_address || "Destination selected"}
                           </div>
                         ) : (
                           <div className="text-xs text-muted-foreground mt-1">
-                            Exact location visible after accepted/on_the_way
+                            {normalizeStatus(b.status) === "accepted"
+                              ? "Click Mark On The Way to start live navigation"
+                              : "Location tracking hidden"}
                           </div>
                         )}
                       </div>
@@ -755,6 +826,30 @@ const ProviderDashboard = () => {
                             <span className={`text-xs px-3 py-1 rounded-full font-medium ${statusBadgeClass(b.status)}`}>
                               {normalizeStatus(b.status).replace(/_/g, " ")}
                             </span>
+                            {normalizeStatus(b.status) === "completed" && (() => {
+                              const review = reviewByBookingId.get(String(b.id));
+                              if (!review) {
+                                return (
+                                  <span className="text-xs text-muted-foreground">Not rated yet</span>
+                                );
+                              }
+                              const rating = Math.max(1, Math.min(5, Number(review.rating || 0)));
+                              return (
+                                <span className="text-xs text-muted-foreground flex items-center gap-1">
+                                  <span className="text-foreground/90">{review.seeker_name}</span>
+                                  <span className="flex items-center gap-0.5">
+                                    {[1, 2, 3, 4, 5].map((star) => (
+                                      <Star
+                                        key={`${b.id}-booking-review-${star}`}
+                                        className={`w-3 h-3 ${star <= rating ? "text-yellow-400" : "text-muted-foreground"}`}
+                                        fill={star <= rating ? "currentColor" : "none"}
+                                      />
+                                    ))}
+                                  </span>
+                                  <span>{rating.toFixed(1)}★</span>
+                                </span>
+                              );
+                            })()}
                             {normalizeStatus(b.status) !== "completed" && normalizeStatus(b.status) !== "cancelled" && (
                               <div className="flex gap-2 flex-wrap justify-end">
                                 {lifecycleSteps.slice(1).map((targetStatus) => (
@@ -780,7 +875,7 @@ const ProviderDashboard = () => {
                         )}
                       </div>
                     </div>
-                    {(normalizeStatus(b.status) === "accepted" || normalizeStatus(b.status) === "on_the_way") &&
+                    {normalizeStatus(b.status) === "on_the_way" &&
                       (b as any).booking_location_latitude &&
                       (b as any).booking_location_longitude && (
                         <div className="px-4 pb-4">
@@ -814,6 +909,13 @@ const ProviderDashboard = () => {
                     <div className="flex-1">
                       <div className="font-medium text-foreground">{s.title}</div>
                       <div className="text-sm text-muted-foreground">{s.category} · ₹{s.price}</div>
+                      <div className="text-xs text-muted-foreground mt-1 flex items-center gap-1">
+                        <Star className="w-3 h-3 text-yellow-400" fill="currentColor" />
+                        <span>
+                          {Number(s.review_count || 0) > 0 ? `${Number(s.rating || 0).toFixed(1)}★` : "New"}
+                          {` (${Number(s.review_count || 0)} rating${Number(s.review_count || 0) === 1 ? "" : "s"})`}
+                        </span>
+                      </div>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className={`text-xs px-2 py-1 rounded-full font-medium ${
@@ -831,6 +933,22 @@ const ProviderDashboard = () => {
                 ))}
               </div>
             )}
+          </div>
+
+          {/* Support Section */}
+          <div className="glass rounded-2xl p-6">
+            <div className="flex items-center justify-between mb-6">
+              <div>
+                <h2 className="text-xl font-display font-semibold text-foreground">Need Help?</h2>
+                <p className="text-sm text-muted-foreground mt-1">Report issues or contact support</p>
+              </div>
+              <Button variant="hero" size="sm" className="rounded-lg" onClick={() => navigate("/support")}>
+                <HelpCircle className="w-4 h-4 mr-1" /> Create Support Ticket
+              </Button>
+            </div>
+            <p className="text-sm text-muted-foreground">
+              Having issues with bookings, payments, or platform features? Create a support ticket and our team will assist you.
+            </p>
           </div>
 
           {/* Add Service Modal */}

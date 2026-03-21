@@ -17,6 +17,7 @@ import {
   Edit,
   Ban,
   CheckCircle2,
+  CheckCircle,
   Wifi,
   Activity,
 } from "lucide-react";
@@ -43,7 +44,12 @@ export default function AdminDashboard() {
   const [showAddService, setShowAddService] = useState(false);
   const [editingService, setEditingService] = useState<any | null>(null);
   const [updatingBookingId, setUpdatingBookingId] = useState<string | null>(null);
+  const [resolvingTicketId, setResolvingTicketId] = useState<string | null>(null);
+  const [supportTab, setSupportTab] = useState<"seeker" | "provider">("seeker");
+  const [expandedTicketId, setExpandedTicketId] = useState<string | null>(null);
   const [bookingStatusDrafts, setBookingStatusDrafts] = useState<Record<string, string>>({});
+  const [unresolvedSeekerCount, setUnresolvedSeekerCount] = useState(0);
+  const [unresolvedProviderCount, setUnresolvedProviderCount] = useState(0);
   const [editFields, setEditFields] = useState({
     title: "",
     description: "",
@@ -61,6 +67,24 @@ export default function AdminDashboard() {
         { event: "*", schema: "public", table: "services" },
         () => {
           queryClient.invalidateQueries({ queryKey: ["admin-services"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [queryClient]);
+
+  // Realtime: update support tickets when created or updated
+  useEffect(() => {
+    const ch = supabase
+      .channel("admin-support-tickets-rt")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "support_tickets" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["admin-support-tickets"] });
         }
       )
       .subscribe();
@@ -199,6 +223,18 @@ export default function AdminDashboard() {
     },
   });
 
+  // Calculate unresolved ticket counts in real-time
+  useEffect(() => {
+    const unresolved = (supportTickets as any[]).filter(
+      (t) => t.status === "open" || t.status === "in_review"
+    );
+    const seekerUnresolved = unresolved.filter((t) => t.created_by_role === "seeker").length;
+    const providerUnresolved = unresolved.filter((t) => t.created_by_role === "provider").length;
+    
+    setUnresolvedSeekerCount(seekerUnresolved);
+    setUnresolvedProviderCount(providerUnresolved);
+  }, [supportTickets]);
+
   useEffect(() => {
     if (!bookingsError) return;
     toast({
@@ -300,6 +336,40 @@ export default function AdminDashboard() {
     toast({ title: "Booking status changed", description: `Updated to ${nextStatus.replace(/_/g, " ")}` });
     queryClient.invalidateQueries({ queryKey: ["admin-bookings"] });
     queryClient.invalidateQueries({ queryKey: ["admin-booking-events"] });
+  };
+
+  const handleResolveTicket = async (ticketId: string) => {
+    setResolvingTicketId(ticketId);
+    const { error } = await supabase
+      .from("support_tickets")
+      .update({ status: "resolved" })
+      .eq("id", ticketId);
+    setResolvingTicketId(null);
+
+    if (error) {
+      toast({ title: "Failed to resolve ticket", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({ title: "Ticket resolved", description: "Support ticket marked as resolved." });
+    queryClient.invalidateQueries({ queryKey: ["admin-support-tickets"] });
+  };
+
+  const handleCloseTicket = async (ticketId: string) => {
+    setResolvingTicketId(ticketId);
+    const { error } = await supabase
+      .from("support_tickets")
+      .update({ status: "closed" })
+      .eq("id", ticketId);
+    setResolvingTicketId(null);
+
+    if (error) {
+      toast({ title: "Failed to close ticket", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    toast({ title: "Ticket closed", description: "Support ticket marked as closed." });
+    queryClient.invalidateQueries({ queryKey: ["admin-support-tickets"] });
   };
 
   const openEditService = (service: any) => {
@@ -851,60 +921,173 @@ const handleApproveService = async (id: string) => {
   const renderSupport = () => {
     const seekerTickets = (supportTickets as any[]).filter((t: any) => t.created_by_role === "seeker");
     const providerTickets = (supportTickets as any[]).filter((t: any) => t.created_by_role === "provider");
-
-    const tableBlock = (title: string, rows: any[]) => (
-      <div className="glass p-6">
-        <div className="flex items-center justify-between mb-4">
-          <h2 className="text-lg font-semibold">{title}</h2>
-          <span className="text-xs text-muted-foreground">{rows.length} tickets</span>
-        </div>
-
-        {rows.length === 0 ? (
-          <p className="text-sm text-muted-foreground">No tickets found.</p>
-        ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="text-left border-b border-border/40">
-                  <th className="py-2 pr-3">Ticket ID</th>
-                  <th className="py-2 pr-3">Type</th>
-                  <th className="py-2 pr-3">Subject</th>
-                  <th className="py-2 pr-3">Service ID</th>
-                  <th className="py-2 pr-3">Booking ID</th>
-                  <th className="py-2 pr-3">Status</th>
-                  <th className="py-2 pr-3">Priority</th>
-                  <th className="py-2 pr-3">Created</th>
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map((ticket: any) => (
-                  <tr key={ticket.id} className="border-b border-border/20 align-top">
-                    <td className="py-2 pr-3 font-mono text-[11px] text-accent">{ticket.ticket_code || ticket.id}</td>
-                    <td className="py-2 pr-3 capitalize">{ticket.type}</td>
-                    <td className="py-2 pr-3 max-w-[220px]">
-                      <p className="line-clamp-2">{ticket.subject}</p>
-                    </td>
-                    <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">{ticket.service_id || "-"}</td>
-                    <td className="py-2 pr-3 font-mono text-[11px] text-muted-foreground">{ticket.booking_id || "-"}</td>
-                    <td className="py-2 pr-3 capitalize">{ticket.status}</td>
-                    <td className="py-2 pr-3 capitalize">{ticket.priority}</td>
-                    <td className="py-2 pr-3 text-xs text-muted-foreground">{new Date(ticket.created_at).toLocaleString()}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
-    );
+    const tickets = supportTab === "seeker" ? seekerTickets : providerTickets;
 
     return (
-      <div className="space-y-4">
-        <p className="text-sm text-muted-foreground">
-          Support tickets are separated by reporter role to help Admin investigate seeker and provider issues independently.
-        </p>
-        {tableBlock("Seeker Support", seekerTickets)}
-        {tableBlock("Provider Support", providerTickets)}
+      <div className="space-y-6">
+        {/* Tab Buttons */}
+        <div className="flex gap-3">
+          <Button
+            variant={supportTab === "seeker" ? "hero" : "outline"}
+            onClick={() => { setSupportTab("seeker"); setExpandedTicketId(null); }}
+            className="rounded-lg relative"
+          >
+            {unresolvedSeekerCount > 0 && (
+              <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-destructive text-destructive-foreground text-xs font-bold flex items-center justify-center animate-pulse">
+                {unresolvedSeekerCount}
+              </span>
+            )}
+            Seeker ({seekerTickets.length})
+          </Button>
+          <Button
+            variant={supportTab === "provider" ? "hero" : "outline"}
+            onClick={() => { setSupportTab("provider"); setExpandedTicketId(null); }}
+            className="rounded-lg relative"
+          >
+            {unresolvedProviderCount > 0 && (
+              <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-destructive text-destructive-foreground text-xs font-bold flex items-center justify-center animate-pulse">
+                {unresolvedProviderCount}
+              </span>
+            )}
+            Provider ({providerTickets.length})
+          </Button>
+        </div>
+
+        {/* Tickets Grid */}
+        {tickets.length === 0 ? (
+          <div className="glass p-8 text-center">
+            <p className="text-muted-foreground">No {supportTab} tickets found.</p>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
+            {tickets.map((ticket: any) => {
+              const isExpanded = expandedTicketId === ticket.id;
+              const statusColor = 
+                ticket.status === "resolved" ? "bg-success/20 text-success" :
+                ticket.status === "closed" ? "bg-muted/20 text-muted-foreground" :
+                ticket.status === "in_review" ? "bg-info/20 text-info" :
+                ticket.status === "open" ? "bg-warning/20 text-warning" :
+                "bg-secondary/20 text-foreground";
+
+              const priorityColor =
+                ticket.priority === "urgent" ? "bg-destructive/20 text-destructive border-destructive/30" :
+                ticket.priority === "high" ? "bg-orange-500/20 text-orange-400 border-orange-500/30" :
+                ticket.priority === "normal" ? "bg-info/20 text-info border-info/30" :
+                "bg-muted/20 text-muted-foreground border-border/30";
+
+              return (
+                <div
+                  key={ticket.id}
+                  className={`glass rounded-xl border transition-all cursor-pointer overflow-hidden ${
+                    isExpanded
+                      ? "md:col-span-2 lg:col-span-3 p-6 border-accent/50"
+                      : "p-4 border-border/30 hover:border-accent/50 hover:bg-secondary/20"
+                  }`}
+                  onClick={() => setExpandedTicketId(isExpanded ? null : ticket.id)}
+                >
+                  <div className="space-y-2">
+                    {/* Header with badges and date */}
+                    <div className="flex items-start justify-between gap-3 mb-3">
+                      <div className="flex items-center gap-2 flex-wrap">
+                        <span className="font-mono text-[11px] text-accent font-semibold">
+                          {ticket.ticket_code || ticket.id.slice(0, 8)}
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium capitalize ${statusColor}`}>
+                          {ticket.status}
+                        </span>
+                        <span className={`text-[10px] px-2 py-0.5 rounded-full font-medium capitalize border ${priorityColor}`}>
+                          {ticket.priority}
+                        </span>
+                      </div>
+                      <div className="text-xs text-muted-foreground whitespace-nowrap flex-shrink-0">
+                        {new Date(ticket.created_at).toLocaleDateString()}
+                      </div>
+                    </div>
+
+                    {/* Content */}
+                    <div>
+                      <h3 className={`font-semibold text-foreground mb-1 ${isExpanded ? "text-base" : "text-sm line-clamp-2"}`}>
+                        {ticket.subject}
+                      </h3>
+                      <p className={`text-xs text-muted-foreground ${isExpanded ? "block" : "line-clamp-1"}`}>
+                        {ticket.description}
+                      </p>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="mt-6 space-y-4 pt-6 border-t border-border/30">
+                      {/* Full Details */}
+                      <div className="space-y-3">
+                        <div>
+                          <label className="text-xs font-semibold text-muted-foreground uppercase">Type</label>
+                          <p className="text-sm text-foreground capitalize mt-1">{ticket.type}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-semibold text-muted-foreground uppercase">Full Description</label>
+                          <p className="text-sm text-foreground mt-1 whitespace-pre-wrap">{ticket.description}</p>
+                        </div>
+                        {ticket.booking_id && (
+                          <div className="grid grid-cols-2 gap-3">
+                            <div>
+                              <label className="text-xs font-semibold text-muted-foreground uppercase">Booking ID</label>
+                              <p className="text-xs text-accent font-mono mt-1">{ticket.booking_id.slice(0, 16)}...</p>
+                            </div>
+                            <div>
+                              <label className="text-xs font-semibold text-muted-foreground uppercase">Service ID</label>
+                              <p className="text-xs text-muted-foreground font-mono mt-1">{ticket.service_id ? ticket.service_id.slice(0, 16) + "..." : "-"}</p>
+                            </div>
+                          </div>
+                        )}
+                        <div className="text-xs text-muted-foreground">
+                          Created: {new Date(ticket.created_at).toLocaleString()}
+                        </div>
+                      </div>
+
+                      {/* Actions */}
+                      <div className="flex gap-2 pt-4 border-t border-border/30">
+                        {ticket.status !== "resolved" && ticket.status !== "closed" && (
+                          <>
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleResolveTicket(ticket.id);
+                              }}
+                              disabled={resolvingTicketId === ticket.id}
+                              className="rounded-lg flex-1"
+                            >
+                              {resolvingTicketId === ticket.id ? "..." : "Resolve"}
+                            </Button>
+                            <Button
+                              size="sm"
+                              variant="destructive"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                handleCloseTicket(ticket.id);
+                              }}
+                              disabled={resolvingTicketId === ticket.id}
+                              className="rounded-lg flex-1"
+                            >
+                              {resolvingTicketId === ticket.id ? "..." : "Close"}
+                            </Button>
+                          </>
+                        )}
+                        {(ticket.status === "resolved" || ticket.status === "closed") && (
+                          <div className="flex items-center gap-2 text-success text-sm font-medium w-full justify-center">
+                            <CheckCircle className="w-4 h-4" />
+                            {ticket.status}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        )}
       </div>
     );
   };
@@ -942,19 +1125,29 @@ const handleApproveService = async (id: string) => {
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-3">
-        {["overview", "approvals", "services", "users", "providers", "bookings", "live", "support"].map((tab) => (
-          <Button
-            key={tab}
-            variant={activeTab === tab ? "default" : "outline"}
-            onClick={() => setActiveTab(tab)}
-            className={tab === "live" ? "relative" : ""}
-          >
-            {tab === "live" && (
-              <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
-            )}
-            {tab.charAt(0).toUpperCase() + tab.slice(1)}
-          </Button>
-        ))}
+        {["overview", "approvals", "services", "users", "providers", "bookings", "live", "support"].map((tab) => {
+          const totalUnresolved = unresolvedSeekerCount + unresolvedProviderCount;
+          const showBadge = tab === "support" && totalUnresolved > 0;
+          
+          return (
+            <Button
+              key={tab}
+              variant={activeTab === tab ? "default" : "outline"}
+              onClick={() => setActiveTab(tab)}
+              className={`relative ${tab === "live" ? "" : ""}`}
+            >
+              {tab === "live" && (
+                <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              )}
+              {showBadge && (
+                <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-destructive text-destructive-foreground text-xs font-bold flex items-center justify-center animate-pulse">
+                  {totalUnresolved}
+                </span>
+              )}
+              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+            </Button>
+          );
+        })}
       </div>
 
       {/* Tab Content */}

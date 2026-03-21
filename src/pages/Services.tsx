@@ -230,6 +230,22 @@ const Services = () => {
     staleTime: 30000,
   });
 
+  useEffect(() => {
+    const ch = supabase
+      .channel("services-and-reviews-live")
+      .on("postgres_changes", { event: "*", schema: "public", table: "services" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["services"] });
+      })
+      .on("postgres_changes", { event: "*", schema: "public", table: "reviews" }, () => {
+        queryClient.invalidateQueries({ queryKey: ["services"] });
+      })
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [queryClient]);
+
   return (
     <div className="min-h-screen bg-background services-page-root">
       <Seo
@@ -340,185 +356,176 @@ const Services = () => {
               )}
 
               {/* Filtering Section */}
-              {isServiceTypeSearched ? (
-                <div className="glass rounded-2xl p-3 services-filter-bar">
-                  {/* Compact Filter Header */}
-                  <div className="flex items-center justify-between mb-3">
-                    <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-                      <SlidersHorizontal className="w-4 h-4" />
-                      <span>Filters ({services?.length || 0} services)</span>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      {/* Individual Reset Buttons */}
-                      {(selectedCategory || locationFilter || maxPrice < 50000 || minRating > 0) && (
-                        <>
-                          {selectedCategory && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setSelectedCategory(null)}
-                              className="text-xs h-6 px-2"
-                            >
-                              Reset Category
-                            </Button>
-                          )}
-                          {locationFilter && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setLocationFilter("")}
-                              className="text-xs h-6 px-2"
-                            >
-                              Reset Location
-                            </Button>
-                          )}
-                          {maxPrice < 50000 && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setMaxPrice(50000)}
-                              className="text-xs h-6 px-2"
-                            >
-                              Reset Price
-                            </Button>
-                          )}
-                          {minRating > 0 && (
-                            <Button
-                              variant="ghost"
-                              size="sm"
-                              onClick={() => setMinRating(0)}
-                              className="text-xs h-6 px-2"
-                            >
-                              Reset Quality
-                            </Button>
-                          )}
-                        </>
-                      )}
-                      {/* Main Clear All Button */}
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        onClick={() => {
-                          setSelectedCategory(null);
-                          setLocationFilter("");
-                          setMaxPrice(50000);
-                          setMinRating(0);
-                        }}
-                        className="text-xs h-8"
-                      >
-                        Clear All
-                      </Button>
-                    </div>
+              <div className="glass rounded-2xl p-3 services-filter-bar">
+                {/* Compact Filter Header */}
+                <div className="flex items-center justify-between mb-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <SlidersHorizontal className="w-4 h-4" />
+                    <span>Filters ({services?.length || 0} services)</span>
                   </div>
-
-                  {/* Active Filters */}
-                  {(selectedCategory || locationFilter || maxPrice < 50000 || minRating > 0) && (
-                    <div className="flex flex-wrap items-center gap-1 mb-3">
-                      <span className="text-xs text-muted-foreground">Active:</span>
-                      {selectedCategory && (
-                        <span className="bg-primary/20 text-primary px-2 py-1 rounded-full text-xs flex items-center gap-1">
-                          {selectedCategory}
-                          <button
-                            onClick={() => setSelectedCategory(null)}
-                            className="hover:bg-primary/30 rounded-full p-0.5"
-                            title="Reset category"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      )}
-                      {locationFilter && (
-                        <span className="bg-accent/20 text-accent px-2 py-1 rounded-full text-xs flex items-center gap-1">
-                          📍 {locationFilter}
-                          <button
-                            onClick={() => setLocationFilter("")}
-                            className="hover:bg-accent/30 rounded-full p-0.5"
-                            title="Reset location"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      )}
-                      {maxPrice < 50000 && (
-                        <span className="bg-warning/20 text-warning px-2 py-1 rounded-full text-xs flex items-center gap-1">
-                          ≤₹{maxPrice.toLocaleString('en-IN')}
-                          <button
-                            onClick={() => setMaxPrice(50000)}
-                            className="hover:bg-warning/30 rounded-full p-0.5"
-                            title="Reset price"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      )}
-                      {minRating > 0 && (
-                        <span className="bg-emerald-20 text-emerald-600 px-2 py-1 rounded-full text-xs flex items-center gap-1">
-                          {minRating === 3 ? "Good" : minRating === 4 ? "Better" : "Best"}
-                          <button
-                            onClick={() => setMinRating(0)}
-                            className="hover:bg-emerald-30 rounded-full p-0.5"
-                            title="Reset quality"
-                          >
-                            ×
-                          </button>
-                        </span>
-                      )}
-                    </div>
-                  )}
-
-                  {/* Compact Filter Controls */}
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
-                    {/* Price */}
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-foreground">Price</label>
-                      <select
-                        value={maxPrice}
-                        onChange={(e) => setMaxPrice(Number(e.target.value))}
-                        className="text-xs bg-secondary/30 border border-border rounded px-2 py-1 h-8"
-                      >
-                        <option value={50000}>Any Price</option>
-                        <option value={500}>Under ₹500</option>
-                        <option value={1000}>Under ₹1k</option>
-                        <option value={2000}>Under ₹2k</option>
-                        <option value={5000}>Under ₹5k</option>
-                      </select>
-                    </div>
-
-                    {/* Quality */}
-                    <div className="flex flex-col gap-1">
-                      <label className="text-xs font-medium text-foreground">Quality</label>
-                      <select
-                        value={minRating}
-                        onChange={(e) => setMinRating(Number(e.target.value))}
-                        className="text-xs bg-secondary/30 border border-border rounded px-2 py-1 h-8"
-                      >
-                        <option value={0}>Any</option>
-                        <option value={3}>Good ⭐⭐⭐</option>
-                        <option value={4}>Better ⭐⭐⭐⭐</option>
-                        <option value={5}>Best ⭐⭐⭐⭐⭐</option>
-                      </select>
-                    </div>
-
-                    {/* Location */}
-                    <div className="flex flex-col gap-1 md:col-span-2">
-                      <label className="text-xs font-medium text-foreground">Location</label>
-                      <Input
-                        value={locationFilter}
-                        onChange={(e) => setLocationFilter(e.target.value)}
-                        placeholder="Area or city..."
-                        className="text-xs bg-secondary/30 border border-border h-8"
-                      />
-                    </div>
-                  </div>
-                </div>
-              ) : (
-                <div className="glass rounded-2xl p-4 text-sm text-muted-foreground services-filter-bar">
                   <div className="flex items-center gap-2">
-                    <Search className="w-4 h-4" />
-                    <span>Search for a service above to see filtering options</span>
+                    {/* Individual Reset Buttons */}
+                    {(selectedCategory || locationFilter || maxPrice < 50000 || minRating > 0) && (
+                      <>
+                        {selectedCategory && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setSelectedCategory(null)}
+                            className="text-xs h-6 px-2"
+                          >
+                            Reset Category
+                          </Button>
+                        )}
+                        {locationFilter && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setLocationFilter("")}
+                            className="text-xs h-6 px-2"
+                          >
+                            Reset Location
+                          </Button>
+                        )}
+                        {maxPrice < 50000 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setMaxPrice(50000)}
+                            className="text-xs h-6 px-2"
+                          >
+                            Reset Price
+                          </Button>
+                        )}
+                        {minRating > 0 && (
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setMinRating(0)}
+                            className="text-xs h-6 px-2"
+                          >
+                            Reset Quality
+                          </Button>
+                        )}
+                      </>
+                    )}
+                    {/* Main Clear All Button */}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      onClick={() => {
+                        setSelectedCategory(null);
+                        setLocationFilter("");
+                        setMaxPrice(50000);
+                        setMinRating(0);
+                      }}
+                      className="text-xs h-8"
+                    >
+                      Clear All
+                    </Button>
                   </div>
                 </div>
-              )}
+
+                {/* Active Filters */}
+                {(selectedCategory || locationFilter || maxPrice < 50000 || minRating > 0) && (
+                  <div className="flex flex-wrap items-center gap-1 mb-3">
+                    <span className="text-xs text-muted-foreground">Active:</span>
+                    {selectedCategory && (
+                      <span className="bg-primary/20 text-primary px-2 py-1 rounded-full text-xs flex items-center gap-1">
+                        {selectedCategory}
+                        <button
+                          onClick={() => setSelectedCategory(null)}
+                          className="hover:bg-primary/30 rounded-full p-0.5"
+                          title="Reset category"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    )}
+                    {locationFilter && (
+                      <span className="bg-accent/20 text-accent px-2 py-1 rounded-full text-xs flex items-center gap-1">
+                        📍 {locationFilter}
+                        <button
+                          onClick={() => setLocationFilter("")}
+                          className="hover:bg-accent/30 rounded-full p-0.5"
+                          title="Reset location"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    )}
+                    {maxPrice < 50000 && (
+                      <span className="bg-warning/20 text-warning px-2 py-1 rounded-full text-xs flex items-center gap-1">
+                        ≤₹{maxPrice.toLocaleString('en-IN')}
+                        <button
+                          onClick={() => setMaxPrice(50000)}
+                          className="hover:bg-warning/30 rounded-full p-0.5"
+                          title="Reset price"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    )}
+                    {minRating > 0 && (
+                      <span className="bg-emerald-20 text-emerald-600 px-2 py-1 rounded-full text-xs flex items-center gap-1">
+                        {minRating === 3 ? "Good" : minRating === 4 ? "Better" : "Best"}
+                        <button
+                          onClick={() => setMinRating(0)}
+                          className="hover:bg-emerald-30 rounded-full p-0.5"
+                          title="Reset quality"
+                        >
+                          ×
+                        </button>
+                      </span>
+                    )}
+                  </div>
+                )}
+
+                {/* Compact Filter Controls */}
+                <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+                  {/* Price */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-foreground">Price</label>
+                    <select
+                      value={maxPrice}
+                      onChange={(e) => setMaxPrice(Number(e.target.value))}
+                      className="text-xs bg-secondary/30 border border-border rounded px-2 py-1 h-8"
+                    >
+                      <option value={50000}>Any Price</option>
+                      <option value={500}>Under ₹500</option>
+                      <option value={1000}>Under ₹1k</option>
+                      <option value={2000}>Under ₹2k</option>
+                      <option value={5000}>Under ₹5k</option>
+                    </select>
+                  </div>
+
+                  {/* Quality */}
+                  <div className="flex flex-col gap-1">
+                    <label className="text-xs font-medium text-foreground">Quality</label>
+                    <select
+                      value={minRating}
+                      onChange={(e) => setMinRating(Number(e.target.value))}
+                      className="text-xs bg-secondary/30 border border-border rounded px-2 py-1 h-8"
+                    >
+                      <option value={0}>Any</option>
+                      <option value={3}>Good ⭐⭐⭐</option>
+                      <option value={4}>Better ⭐⭐⭐⭐</option>
+                      <option value={5}>Best ⭐⭐⭐⭐⭐</option>
+                    </select>
+                  </div>
+
+                  {/* Location */}
+                  <div className="flex flex-col gap-1 md:col-span-2">
+                    <label className="text-xs font-medium text-foreground">Location</label>
+                    <Input
+                      value={locationFilter}
+                      onChange={(e) => setLocationFilter(e.target.value)}
+                      placeholder="Area or city..."
+                      className="text-xs bg-secondary/30 border border-border h-8"
+                    />
+                  </div>
+                </div>
+              </div>
 
               {/* Service Results */}
               {isLoading ? (
@@ -596,7 +603,11 @@ const Services = () => {
               ) : (
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                   <AnimatePresence mode="popLayout">
-                    {services.map((service: any) => (
+                    {services.map((service: any) => {
+                      const ratingValue = Math.max(0, Math.min(5, Number(service.rating) || 0));
+                      const filledStars = Math.floor(ratingValue);
+
+                      return (
                       <motion.div
                         key={service.id}
                         layout
@@ -608,11 +619,11 @@ const Services = () => {
                       >
                         <div className="flex flex-col gap-4">
                           {/* Rating Badge for High-Rated Services */}
-                          {service.rating && service.rating >= 4.5 && (
+                          {ratingValue >= 4.5 && (
                             <div className="flex justify-center">
                               <div className="bg-gradient-to-r from-warning/20 to-success/20 px-3 py-1 rounded-full border border-warning/30">
                                 <span className="text-xs font-semibold text-warning flex items-center gap-1">
-                                  <Star className="w-3 h-3 fill-warning" />
+                                  <Star className="w-3 h-3 text-yellow-400" fill="currentColor" />
                                   Top Rated
                                 </span>
                               </div>
@@ -633,19 +644,18 @@ const Services = () => {
                                     {[1, 2, 3, 4, 5].map((star) => (
                                       <Star
                                         key={star}
-                                        className={`w-3 h-3 ${
-                                          star <= (service.rating || 0)
-                                            ? "text-warning fill-warning"
-                                            : "text-muted-foreground"
-                                        }`}
+                                        className={`w-3 h-3 ${star <= filledStars ? "text-yellow-400" : "text-muted-foreground"}`}
+                                        fill={star <= filledStars ? "currentColor" : "none"}
                                       />
                                     ))}
                                   </div>
-                                  <span className="text-sm font-bold text-foreground">{service.rating || "New"}</span>
+                                    <span className="text-sm font-bold text-foreground">
+                                      {ratingValue > 0 ? ratingValue.toFixed(1) : "New"}
+                                    </span>
                                 </div>
-                                {service.review_count > 0 && (
-                                  <span className="text-xs text-muted-foreground">{service.review_count} reviews</span>
-                                )}
+                                  <span className="text-xs text-muted-foreground">
+                                    {Number(service.review_count || 0)} rating{Number(service.review_count || 0) === 1 ? "" : "s"}
+                                  </span>
                               </div>
                               <span className="font-display font-bold text-accent flex items-center">
                                 <IndianRupee className="w-3.5 h-3.5" />{service.price}
@@ -662,7 +672,7 @@ const Services = () => {
                           </div>
                         </div>
                       </motion.div>
-                    ))}
+                    );})}
                   </AnimatePresence>
                 </div>
               )}
