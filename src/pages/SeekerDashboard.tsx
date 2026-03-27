@@ -18,6 +18,10 @@ import { getSubscriptionStatus, registerBackgroundPushForCurrentUser } from "@/l
 import RealtimeNotificationBell from "@/components/notifications/RealtimeNotificationBell";
 import { usePersistentNotifications } from "@/hooks/usePersistentNotifications";
 import { toPublicNumericId } from "@/lib/utils";
+import CallButton from "@/components/videocall/CallButton";
+import CallIncomingDialog from "@/components/videocall/CallIncomingDialog";
+import VideoCallModal from "@/components/videocall/VideoCallModal";
+import { useVideoCall } from "@/hooks/useVideoCall";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/20 text-warning",
@@ -105,9 +109,19 @@ const SeekerDashboard = () => {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<"default" | "granted" | "denied" | "unsupported">("default");
   const [pushEnabled, setPushEnabled] = useState(false);
+  const [acceptedIncomingCall, setAcceptedIncomingCall] = useState<any | null>(null);
   const handledRealtimeAlertKeysRef = useRef<Set<string>>(new Set());
   const lastKnownBookingStatusRef = useRef<Record<string, string>>({});
   const { unreadNotifications, unreadCount, markRead, markAllRead } = usePersistentNotifications(user?.id);
+  const {
+    incomingCalls,
+    pendingCall,
+    acceptCall,
+    acceptCallLoading,
+    declineCall,
+    declineCallLoading,
+    endCall,
+  } = useVideoCall();
 
   useEffect(() => {
     if (!loading && !user) navigate("/login");
@@ -193,6 +207,21 @@ const SeekerDashboard = () => {
       return data;
     },
     enabled: !!user,
+  });
+
+  // Fetch admin user ID for video calls
+  const { data: adminUser } = useQuery({
+    queryKey: ["admin-user"],
+    queryFn: async () => {
+      const { data } = await supabase
+        .from("user_roles")
+        .select("user_id")
+        .eq("role", "admin")
+        .limit(1)
+        .single();
+      return data?.user_id || null;
+    },
+    staleTime: 3600000, // Cache for 1 hour
   });
 
   useEffect(() => {
@@ -876,6 +905,17 @@ const SeekerDashboard = () => {
                             <Star className="w-3 h-3 mr-1" /> Review
                           </Button>
                         )}
+                        {normalizedStatus === "completed" && adminUser && (
+                          <CallButton
+                            bookingId={order.id}
+                            serviceId={order.service_id}
+                            receiverId={adminUser}
+                            receiverName="Admin"
+                            initiatorRole="seeker"
+                            size="sm"
+                            showLabel={true}
+                          />
+                        )}
                         {normalizedStatus === "completed" && reviewedSet.has(order.id) && (
                           <span className="text-xs text-muted-foreground flex items-center gap-1">
                             <span className="flex items-center gap-0.5">
@@ -1009,6 +1049,43 @@ const SeekerDashboard = () => {
                 </Button>
               </motion.div>
             </div>
+          )}
+
+          {/* Incoming Call Dialog */}
+          <CallIncomingDialog
+            call={pendingCall || (incomingCalls.length > 0 ? incomingCalls[0] : null)}
+            onAccept={() => {
+              const targetCall = pendingCall || (incomingCalls.length > 0 ? incomingCalls[0] : null);
+              if (targetCall) {
+                acceptCall(targetCall.id, {
+                  onSuccess: (updated: any) => {
+                    setAcceptedIncomingCall(updated);
+                  },
+                });
+              }
+            }}
+            onDecline={() => {
+              const targetCall = pendingCall || (incomingCalls.length > 0 ? incomingCalls[0] : null);
+              if (targetCall) {
+                declineCall({ callId: targetCall.id, reason: "User declined" });
+              }
+            }}
+            acceptLoading={acceptCallLoading}
+            declineLoading={declineCallLoading}
+            initiatorName="Admin"
+          />
+          {acceptedIncomingCall && (
+            <VideoCallModal
+              roomName={acceptedIncomingCall.room_name}
+              displayName="Seeker"
+              onCallEnd={(durationSeconds) => {
+                endCall({ callId: acceptedIncomingCall.id, duration: durationSeconds });
+                setAcceptedIncomingCall(null);
+              }}
+              onClose={() => {
+                setAcceptedIncomingCall(null);
+              }}
+            />
           )}
         </motion.div>
       </div>

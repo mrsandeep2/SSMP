@@ -24,3 +24,7 @@ dist-ssr
 *.sw?
 .env
 
+# Sensitive credential files
+ssmp-89e30-firebase-adminsdk-fbsvc-cfe9fe70aa.json
+google-services.json
+

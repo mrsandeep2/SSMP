@@ -29,6 +29,10 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
+import CallButton from "@/components/videocall/CallButton";
+import CallIncomingDialog from "@/components/videocall/CallIncomingDialog";
+import VideoCallModal from "@/components/videocall/VideoCallModal";
+import { useVideoCall } from "@/hooks/useVideoCall";
 
 /* =========================================================
    ADMIN DASHBOARD
@@ -50,6 +54,7 @@ export default function AdminDashboard() {
   const [bookingStatusDrafts, setBookingStatusDrafts] = useState<Record<string, string>>({});
   const [unresolvedSeekerCount, setUnresolvedSeekerCount] = useState(0);
   const [unresolvedProviderCount, setUnresolvedProviderCount] = useState(0);
+  const [acceptedIncomingCall, setAcceptedIncomingCall] = useState<any | null>(null);
   const [editFields, setEditFields] = useState({
     title: "",
     description: "",
@@ -57,6 +62,16 @@ export default function AdminDashboard() {
     price: "",
     location: "",
   });
+
+  const {
+    incomingCalls,
+    pendingCall,
+    acceptCall,
+    acceptCallLoading,
+    declineCall,
+    declineCallLoading,
+    endCall,
+  } = useVideoCall();
 
   // Realtime: update approvals list when providers submit/updates services
   useEffect(() => {
@@ -820,6 +835,15 @@ const handleApproveService = async (id: string) => {
                   >
                     {updatingBookingId === b.id ? "Updating..." : "Update Status"}
                   </Button>
+                  <CallButton
+                    bookingId={b.id}
+                    serviceId={b.service_id}
+                    receiverId={b.seeker_id}
+                    receiverName="Seeker"
+                    initiatorRole="admin"
+                    size="sm"
+                    showLabel={true}
+                  />
                 </div>
               </div>
             );
@@ -1284,6 +1308,43 @@ const handleApproveService = async (id: string) => {
             </Button>
           </div>
         </div>
+      )}
+
+      {/* Incoming Call Dialog */}
+      <CallIncomingDialog
+        call={pendingCall || (incomingCalls.length > 0 ? incomingCalls[0] : null)}
+        onAccept={() => {
+          const targetCall = pendingCall || (incomingCalls.length > 0 ? incomingCalls[0] : null);
+          if (targetCall) {
+            acceptCall(targetCall.id, {
+              onSuccess: (updated: any) => {
+                setAcceptedIncomingCall(updated);
+              },
+            });
+          }
+        }}
+        onDecline={() => {
+          const targetCall = pendingCall || (incomingCalls.length > 0 ? incomingCalls[0] : null);
+          if (targetCall) {
+            declineCall({ callId: targetCall.id, reason: "User declined" });
+          }
+        }}
+        acceptLoading={acceptCallLoading}
+        declineLoading={declineCallLoading}
+        initiatorName="Seeker"
+      />
+      {acceptedIncomingCall && (
+        <VideoCallModal
+          roomName={acceptedIncomingCall.room_name}
+          displayName="Admin"
+          onCallEnd={(durationSeconds) => {
+            endCall({ callId: acceptedIncomingCall.id, duration: durationSeconds });
+            setAcceptedIncomingCall(null);
+          }}
+          onClose={() => {
+            setAcceptedIncomingCall(null);
+          }}
+        />
       )}
       </div>
     </div>
