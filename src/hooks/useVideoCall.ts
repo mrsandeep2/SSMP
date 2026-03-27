@@ -35,6 +35,7 @@ class VideoCallService {
   static async initiateCall(
     bookingId: string,
     serviceId: string,
+    initiatorId: string,
     receiverId: string,
     initiatorRole: "seeker" | "admin"
   ): Promise<VideoCall> {
@@ -45,7 +46,7 @@ class VideoCallService {
       .insert({
         booking_id: bookingId,
         service_id: serviceId,
-        initiator_id: supabase.auth.session()?.user?.id,
+        initiator_id: initiatorId,
         receiver_id: receiverId,
         room_name: roomName,
         status: "pending",
@@ -204,12 +205,18 @@ export function useVideoCall(bookingId?: string) {
       receiverId: string;
       initiatorRole: "seeker" | "admin";
     }) =>
-      VideoCallService.initiateCall(
-        bookingId,
-        serviceId,
-        receiverId,
-        initiatorRole
-      ),
+      {
+        if (!user?.id) {
+          throw new Error("User not authenticated");
+        }
+        return VideoCallService.initiateCall(
+          bookingId,
+          serviceId,
+          user.id,
+          receiverId,
+          initiatorRole
+        );
+      },
     onSuccess: (data) => {
       queryClient.invalidateQueries({ queryKey: ["active-call", bookingId] });
       setPendingCall(data);
@@ -317,6 +324,7 @@ export function useVideoCall(bookingId?: string) {
     pendingCall,
     setPendingCall,
     initiateCall: initiateCallMutation.mutate,
+    initiateCallAsync: initiateCallMutation.mutateAsync,
     initiateCallLoading: initiateCallMutation.isPending,
     acceptCall: acceptCallMutation.mutate,
     acceptCallLoading: acceptCallMutation.isPending,

@@ -30,7 +30,7 @@ const CallButton = ({
 }: CallButtonProps) => {
   const [showVideoCall, setShowVideoCall] = useState(false);
   const { toast } = useToast();
-  const { activeCall, initiateCall, initiateCallLoading, endCall } = useVideoCall(bookingId);
+  const { activeCall, initiateCallAsync, initiateCallLoading, endCall } = useVideoCall(bookingId);
 
   // Show video modal when active call is established
   useEffect(() => {
@@ -41,7 +41,7 @@ const CallButton = ({
 
   const handleInitiateCall = async () => {
     try {
-      initiateCall({
+      await initiateCallAsync({
         bookingId,
         serviceId,
         receiverId,
@@ -55,7 +55,7 @@ const CallButton = ({
       console.error("Error initiating call:", error);
       toast({
         title: "Failed to initiate call",
-        description: error.message,
+        description: error?.message || "Could not create call.",
         variant: "destructive",
       });
     }
