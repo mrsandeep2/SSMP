@@ -55,6 +55,7 @@ export default function AdminDashboard() {
   const [unresolvedSeekerCount, setUnresolvedSeekerCount] = useState(0);
   const [unresolvedProviderCount, setUnresolvedProviderCount] = useState(0);
   const [acceptedIncomingCall, setAcceptedIncomingCall] = useState<any | null>(null);
+  const [showVideoCall, setShowVideoCall] = useState(false);
   const [editFields, setEditFields] = useState({
     title: "",
     description: "",
@@ -66,12 +67,22 @@ export default function AdminDashboard() {
   const {
     incomingCalls,
     pendingCall,
+    activeCall,
     acceptCall,
     acceptCallLoading,
     declineCall,
     declineCallLoading,
     endCall,
   } = useVideoCall();
+  // Auto-open video call modal for both users when call is active
+  useEffect(() => {
+    if (activeCall && activeCall.status === "active") {
+      setAcceptedIncomingCall(activeCall);
+      setShowVideoCall(true);
+    } else {
+      setShowVideoCall(false);
+    }
+  }, [activeCall]);
 
   // Realtime: update approvals list when providers submit/updates services
   useEffect(() => {
@@ -1333,16 +1344,18 @@ const handleApproveService = async (id: string) => {
         declineLoading={declineCallLoading}
         initiatorName="Seeker"
       />
-      {acceptedIncomingCall && (
+      {showVideoCall && acceptedIncomingCall && (
         <VideoCallModal
           roomName={acceptedIncomingCall.room_name}
           displayName="Admin"
           onCallEnd={(durationSeconds) => {
             endCall({ callId: acceptedIncomingCall.id, duration: durationSeconds });
             setAcceptedIncomingCall(null);
+            setShowVideoCall(false);
           }}
           onClose={() => {
             setAcceptedIncomingCall(null);
+            setShowVideoCall(false);
           }}
         />
       )}

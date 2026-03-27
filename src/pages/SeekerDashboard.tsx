@@ -110,18 +110,29 @@ const SeekerDashboard = () => {
   const [notificationPermission, setNotificationPermission] = useState<"default" | "granted" | "denied" | "unsupported">("default");
   const [pushEnabled, setPushEnabled] = useState(false);
   const [acceptedIncomingCall, setAcceptedIncomingCall] = useState<any | null>(null);
+  const [showVideoCall, setShowVideoCall] = useState(false);
   const handledRealtimeAlertKeysRef = useRef<Set<string>>(new Set());
   const lastKnownBookingStatusRef = useRef<Record<string, string>>({});
   const { unreadNotifications, unreadCount, markRead, markAllRead } = usePersistentNotifications(user?.id);
   const {
     incomingCalls,
     pendingCall,
+    activeCall,
     acceptCall,
     acceptCallLoading,
     declineCall,
     declineCallLoading,
     endCall,
   } = useVideoCall();
+  // Auto-open video call modal for both users when call is active
+  useEffect(() => {
+    if (activeCall && activeCall.status === "active") {
+      setAcceptedIncomingCall(activeCall);
+      setShowVideoCall(true);
+    } else {
+      setShowVideoCall(false);
+    }
+  }, [activeCall]);
 
   useEffect(() => {
     if (!loading && !user) navigate("/login");
@@ -1074,16 +1085,18 @@ const SeekerDashboard = () => {
             declineLoading={declineCallLoading}
             initiatorName="Admin"
           />
-          {acceptedIncomingCall && (
+          {showVideoCall && acceptedIncomingCall && (
             <VideoCallModal
               roomName={acceptedIncomingCall.room_name}
               displayName="Seeker"
               onCallEnd={(durationSeconds) => {
                 endCall({ callId: acceptedIncomingCall.id, duration: durationSeconds });
                 setAcceptedIncomingCall(null);
+                setShowVideoCall(false);
               }}
               onClose={() => {
                 setAcceptedIncomingCall(null);
+                setShowVideoCall(false);
               }}
             />
           )}
