@@ -873,12 +873,15 @@ const SeekerDashboard = () => {
                         </div>
                       </div>
                       <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center sm:flex-wrap sm:justify-end">
-                        <span className={`text-xs px-3 py-1 rounded-full font-medium capitalize ${statusColors[normalizedStatus] || ""}`}>
-                          {statusLabel(normalizedStatus)}
-                        </span>
-                        <span className={`text-xs px-3 py-1 rounded-full font-medium ${paymentBadgeClass(order.payment_status || "unpaid")}`}>
-                          Payment: {paymentLabel(order.payment_status || "unpaid")}
-                        </span>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className={`text-xs px-3 py-1 rounded-full font-medium capitalize ${statusColors[normalizedStatus] || ""}`}>
+                            {statusLabel(normalizedStatus)}
+                          </span>
+                          <span className={`text-xs px-3 py-1 rounded-full font-medium ${paymentBadgeClass(order.payment_status || "unpaid")}`}>
+                            Payment: {paymentLabel(order.payment_status || "unpaid")}
+                          </span>
+                          <span className="font-display font-semibold text-foreground">₹{order.amount}</span>
+                        </div>
                         {(normalizedStatus === "pending" || normalizedStatus === "accepted") && (
                           <Button
                             size="sm"
@@ -955,7 +958,6 @@ const SeekerDashboard = () => {
                           <Button
                             size="sm"
                             variant="hero"
-                            className="w-full sm:w-auto"
                             onClick={async () => {
                               const call = serviceCallByServiceId.get(order.service_id);
                               if (!call) return;
@@ -989,7 +991,6 @@ const SeekerDashboard = () => {
                             <span>You rated {Number(reviewByBooking.get(order.id) || 0)}★</span>
                           </span>
                         )}
-                        <span className="font-display font-semibold text-foreground">₹{order.amount}</span>
                       </div>
                     </div>
                     {isLiveTracking && (
