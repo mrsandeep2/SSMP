@@ -18,4 +18,40 @@ export default defineConfig(({ mode }) => ({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  build: {
+    chunkSizeWarningLimit: 500,
+    rollupOptions: {
+      output: {
+        manualChunks: (id) => {
+          if (!id.includes("node_modules")) return undefined;
+
+          if (/node_modules\/(react|react-dom|react-router-dom)\//.test(id)) {
+            return "vendor";
+          }
+
+          if (
+            id.includes("@radix-ui") ||
+            id.includes("lucide-react") ||
+            id.includes("sonner") ||
+            id.includes("vaul") ||
+            id.includes("cmdk")
+          ) {
+            return "ui";
+          }
+
+          if (
+            id.includes("date-fns") ||
+            id.includes("zod") ||
+            id.includes("clsx") ||
+            id.includes("class-variance-authority") ||
+            id.includes("tailwind-merge")
+          ) {
+            return "utils";
+          }
+
+          return "vendor";
+        },
+      },
+    },
+  },
 }));

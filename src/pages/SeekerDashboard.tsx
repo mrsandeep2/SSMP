@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from "react";
+import { Suspense, lazy, useState, useEffect, useRef } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import "@/styles/seeker-dashboard.css";
@@ -18,8 +18,9 @@ import { getSubscriptionStatus, registerBackgroundPushForCurrentUser } from "@/l
 import RealtimeNotificationBell from "@/components/notifications/RealtimeNotificationBell";
 import { usePersistentNotifications } from "@/hooks/usePersistentNotifications";
 import { toPublicNumericId } from "@/lib/utils";
-import VideoCallModal from "@/components/videocall/VideoCallModal";
 import { useSupportCall } from "@/hooks/useSupportCall";
+
+const VideoCallModal = lazy(() => import("@/components/videocall/VideoCallModal"));
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/20 text-warning",
@@ -1109,25 +1110,27 @@ const SeekerDashboard = () => {
           )}
 
           {showVideoCall && supportRoomName && (
-            <VideoCallModal
-              roomName={supportRoomName}
-              displayName="Seeker"
-              showWaiting={false}
-              onCallEnd={(durationSeconds) => {
-                if (activeRequest?.id) {
-                  endRequest(activeRequest.id);
-                }
-                setSupportRoomName("");
-                setShowVideoCall(false);
-              }}
-              onClose={() => {
-                if (activeRequest?.id && activeRequest.status === "waiting") {
-                  cancelRequest(activeRequest.id);
-                }
-                setSupportRoomName("");
-                setShowVideoCall(false);
-              }}
-            />
+            <Suspense fallback={null}>
+              <VideoCallModal
+                roomName={supportRoomName}
+                displayName="Seeker"
+                showWaiting={false}
+                onCallEnd={(durationSeconds) => {
+                  if (activeRequest?.id) {
+                    endRequest(activeRequest.id);
+                  }
+                  setSupportRoomName("");
+                  setShowVideoCall(false);
+                }}
+                onClose={() => {
+                  if (activeRequest?.id && activeRequest.status === "waiting") {
+                    cancelRequest(activeRequest.id);
+                  }
+                  setSupportRoomName("");
+                  setShowVideoCall(false);
+                }}
+              />
+            </Suspense>
           )}
         </motion.div>
       </div>

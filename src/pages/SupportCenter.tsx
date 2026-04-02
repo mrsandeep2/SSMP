@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, lazy, useEffect, useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import Navbar from "@/components/layout/Navbar";
 import { useAuth } from "@/hooks/useAuth";
@@ -17,7 +17,7 @@ import {
 import { useToast } from "@/hooks/use-toast";
 import { serviceCategories } from "@/data/marketplace";
 import { useSupportCall } from "@/hooks/useSupportCall";
-import VideoCallModal from "@/components/videocall/VideoCallModal";
+const VideoCallModal = lazy(() => import("@/components/videocall/VideoCallModal"));
 
 type TicketType = "help" | "complaint" | "feedback";
 
@@ -915,19 +915,21 @@ const SupportCenter = () => {
       </div>
 
       {showSupportCall && supportRoomName && (
-        <VideoCallModal
-          roomName={supportRoomName}
-          displayName="Seeker"
-          showWaiting={false}
-          onCallEnd={handleSupportCallEnd}
-          onClose={() => {
-            setShowSupportCall(false);
-            if (activeRequest?.room_name === supportRoomName && activeRequest.status === "waiting") {
-              cancelRequest(activeRequest.id);
-            }
-            setSupportRoomName("");
-          }}
-        />
+        <Suspense fallback={null}>
+          <VideoCallModal
+            roomName={supportRoomName}
+            displayName="Seeker"
+            showWaiting={false}
+            onCallEnd={handleSupportCallEnd}
+            onClose={() => {
+              setShowSupportCall(false);
+              if (activeRequest?.room_name === supportRoomName && activeRequest.status === "waiting") {
+                cancelRequest(activeRequest.id);
+              }
+              setSupportRoomName("");
+            }}
+          />
+        </Suspense>
       )}
     </div>
   );

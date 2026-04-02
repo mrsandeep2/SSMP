@@ -2,6 +2,7 @@ import { Toaster } from "@/components/ui/toaster";
 import { Toaster as Sonner } from "@/components/ui/sonner";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { Suspense, lazy } from "react";
 import { BrowserRouter, Routes, Route } from "react-router-dom";
 import { AuthProvider } from "@/hooks/useAuth";
 import ScrollToHash from "@/components/ScrollToHash";
@@ -18,9 +19,9 @@ import Blog from "./pages/Blog";
 import FaqPage from "./pages/FaqPage";
 import About from "./pages/About";
 import Contact from "./pages/Contact";
-import SeekerDashboard from "./pages/SeekerDashboard";
-import ProviderDashboard from "./pages/ProviderDashboard";
-import AdminDashboard from "./pages/AdminDashboard";
+const SeekerDashboard = lazy(() => import("./pages/SeekerDashboard"));
+const ProviderDashboard = lazy(() => import("./pages/ProviderDashboard"));
+const AdminDashboard = lazy(() => import("./pages/AdminDashboard"));
 import Notifications from "./pages/Notifications";
 import SupportCenter from "./pages/SupportCenter";
 import PrivacyPolicy from "./pages/PrivacyPolicy";
@@ -34,6 +35,10 @@ const withNoIndex = (element: JSX.Element) => (
     <Seo title="Private Page | SSMP" noindex canonicalPath="/" />
     {element}
   </>
+);
+
+const LazyFallback = () => (
+  <div className="py-10 text-center text-sm text-muted-foreground">Loading...</div>
 );
 
 const App = () => (
@@ -64,7 +69,11 @@ const App = () => (
               path="/dashboard/seeker"
               element={(
                 <RoleRoute allowedRole="seeker">
-                  {withNoIndex(<SeekerDashboard />)}
+                  {withNoIndex(
+                    <Suspense fallback={<LazyFallback />}>
+                      <SeekerDashboard />
+                    </Suspense>
+                  )}
                 </RoleRoute>
               )}
             />
@@ -72,7 +81,11 @@ const App = () => (
               path="/dashboard/provider"
               element={(
                 <RoleRoute allowedRole="provider">
-                  {withNoIndex(<ProviderDashboard />)}
+                  {withNoIndex(
+                    <Suspense fallback={<LazyFallback />}>
+                      <ProviderDashboard />
+                    </Suspense>
+                  )}
                 </RoleRoute>
               )}
             />
@@ -80,7 +93,11 @@ const App = () => (
               path="/dashboard/admin"
               element={(
                 <RoleRoute allowedRole="admin">
-                  {withNoIndex(<AdminDashboard />)}
+                  {withNoIndex(
+                    <Suspense fallback={<LazyFallback />}>
+                      <AdminDashboard />
+                    </Suspense>
+                  )}
                 </RoleRoute>
               )}
             />

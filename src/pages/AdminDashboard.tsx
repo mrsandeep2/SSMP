@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { Suspense, lazy, useEffect, useState } from "react";
 import { motion } from "framer-motion";
 import { useNavigate } from "react-router-dom";
 import "@/styles/admin-dashboard.css";
@@ -30,9 +30,10 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
 import CallIncomingDialog from "@/components/videocall/CallIncomingDialog";
-import VideoCallModal from "@/components/videocall/VideoCallModal";
 import { useVideoCall } from "@/hooks/useVideoCall";
 import { useSupportCall } from "@/hooks/useSupportCall";
+
+const VideoCallModal = lazy(() => import("@/components/videocall/VideoCallModal"));
 
 /* =========================================================
    ADMIN DASHBOARD
@@ -1538,44 +1539,48 @@ const handleApproveService = async (id: string) => {
       )}
 
       {showSupportCall && supportCallRoom && supportCallRequestId && (
-        <VideoCallModal
-          roomName={supportCallRoom}
-          displayName="Admin"
-          showWaiting={false}
-          onCallEnd={(durationSeconds) => {
-            endRequest(supportCallRequestId);
-            setShowSupportCall(false);
-            setSupportCallRoom(null);
-            setSupportCallRequestId(null);
-          }}
-          onClose={() => {
-            endRequest(supportCallRequestId);
-            setShowSupportCall(false);
-            setSupportCallRoom(null);
-            setSupportCallRequestId(null);
-          }}
-        />
+        <Suspense fallback={null}>
+          <VideoCallModal
+            roomName={supportCallRoom}
+            displayName="Admin"
+            showWaiting={false}
+            onCallEnd={(durationSeconds) => {
+              endRequest(supportCallRequestId);
+              setShowSupportCall(false);
+              setSupportCallRoom(null);
+              setSupportCallRequestId(null);
+            }}
+            onClose={() => {
+              endRequest(supportCallRequestId);
+              setShowSupportCall(false);
+              setSupportCallRoom(null);
+              setSupportCallRequestId(null);
+            }}
+          />
+        </Suspense>
       )}
       {showServiceCall && serviceCallRoom && serviceCallId && (
-        <VideoCallModal
-          roomName={serviceCallRoom}
-          displayName="Admin"
-          showWaiting={false}
-          onCallEnd={() => {
-            supabase.from("service_calls").update({ status: "ended" }).eq("id", serviceCallId);
-            setShowServiceCall(false);
-            setServiceCallRoom(null);
-            setServiceCallId(null);
-            queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
-          }}
-          onClose={() => {
-            supabase.from("service_calls").update({ status: "ended" }).eq("id", serviceCallId);
-            setShowServiceCall(false);
-            setServiceCallRoom(null);
-            setServiceCallId(null);
-            queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
-          }}
-        />
+        <Suspense fallback={null}>
+          <VideoCallModal
+            roomName={serviceCallRoom}
+            displayName="Admin"
+            showWaiting={false}
+            onCallEnd={() => {
+              supabase.from("service_calls").update({ status: "ended" }).eq("id", serviceCallId);
+              setShowServiceCall(false);
+              setServiceCallRoom(null);
+              setServiceCallId(null);
+              queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
+            }}
+            onClose={() => {
+              supabase.from("service_calls").update({ status: "ended" }).eq("id", serviceCallId);
+              setShowServiceCall(false);
+              setServiceCallRoom(null);
+              setServiceCallId(null);
+              queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
+            }}
+          />
+        </Suspense>
       )}
 
       {/* Incoming Call Dialog */}
@@ -1602,19 +1607,21 @@ const handleApproveService = async (id: string) => {
         initiatorName="Seeker"
       />
       {showVideoCall && acceptedIncomingCall && (
-        <VideoCallModal
-          roomName={acceptedIncomingCall.room_name}
-          displayName="Admin"
-          onCallEnd={(durationSeconds) => {
-            endCall({ callId: acceptedIncomingCall.id, duration: durationSeconds });
-            setAcceptedIncomingCall(null);
-            setShowVideoCall(false);
-          }}
-          onClose={() => {
-            setAcceptedIncomingCall(null);
-            setShowVideoCall(false);
-          }}
-        />
+        <Suspense fallback={null}>
+          <VideoCallModal
+            roomName={acceptedIncomingCall.room_name}
+            displayName="Admin"
+            onCallEnd={(durationSeconds) => {
+              endCall({ callId: acceptedIncomingCall.id, duration: durationSeconds });
+              setAcceptedIncomingCall(null);
+              setShowVideoCall(false);
+            }}
+            onClose={() => {
+              setAcceptedIncomingCall(null);
+              setShowVideoCall(false);
+            }}
+          />
+        </Suspense>
       )}
       </div>
     </div>
