@@ -110,6 +110,9 @@ const VideoCallModal = ({
             ],
           },
           configOverwrite: {
+            prejoinPageEnabled: false,
+            disableDeepLinking: true,
+            enableWelcomePage: false,
             disableSimulcast: false,
             startAudioOnly: false,
             startWithAudioMuted: false,

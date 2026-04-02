@@ -289,6 +289,24 @@ const SeekerDashboard = () => {
     enabled: serviceIds.length > 0,
   });
 
+  useEffect(() => {
+    if (serviceIds.length === 0) return;
+    const channel = supabase
+      .channel("seeker-service-calls-rt")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "service_calls" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["seeker-service-calls"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [serviceIds.length, queryClient]);
+
   const serviceCallByServiceId = new Map(
     (serviceCalls as any[]).map((call: any) => [call.service_id, call])
   );
