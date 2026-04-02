@@ -854,7 +854,7 @@ const SeekerDashboard = () => {
                         <div className="text-[11px] text-muted-foreground mt-1 font-mono">
                           Booking ID: {displayBookingId} | Service ID: {displayServiceId}
                         </div>
-                        <div className="mt-2 flex flex-wrap items-center gap-2">
+                        <div className="mt-2 flex items-center gap-2 overflow-x-auto whitespace-nowrap pr-1">
                           {bookingStages.map((stage, idx) => {
                             const isDone = stageIndex >= idx;
                             return (
