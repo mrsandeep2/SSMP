@@ -29,7 +29,6 @@ import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useToast } from "@/hooks/use-toast";
 import { useAuth } from "@/hooks/useAuth";
-import CallButton from "@/components/videocall/CallButton";
 import CallIncomingDialog from "@/components/videocall/CallIncomingDialog";
 import VideoCallModal from "@/components/videocall/VideoCallModal";
 import { useVideoCall } from "@/hooks/useVideoCall";
@@ -60,7 +59,9 @@ export default function AdminDashboard() {
   const [showSupportCall, setShowSupportCall] = useState(false);
   const [supportCallRoom, setSupportCallRoom] = useState<string | null>(null);
   const [supportCallRequestId, setSupportCallRequestId] = useState<string | null>(null);
-  const [manualSupportRoom, setManualSupportRoom] = useState("");
+  const [serviceCallRoom, setServiceCallRoom] = useState<string | null>(null);
+  const [serviceCallId, setServiceCallId] = useState<string | null>(null);
+  const [showServiceCall, setShowServiceCall] = useState(false);
   const [userFilter, setUserFilter] = useState<
     "active_seekers" | "active_providers" | "blocked_seekers" | "blocked_providers"
   >("active_seekers");
@@ -172,6 +173,24 @@ export default function AdminDashboard() {
     };
   }, [queryClient]);
 
+  // Realtime: service_calls updates
+  useEffect(() => {
+    const ch = supabase
+      .channel("admin-service-calls-rt")
+      .on(
+        "postgres_changes",
+        { event: "*", schema: "public", table: "service_calls" },
+        () => {
+          queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
+        }
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(ch);
+    };
+  }, [queryClient]);
+
   // Realtime: new booking events → refresh live activity feed
   useEffect(() => {
     const ch = supabase
@@ -224,6 +243,14 @@ export default function AdminDashboard() {
     queryKey: ["admin-services"],
     queryFn: async () => {
       const { data } = await supabase.from("services").select("*");
+      return data || [];
+    }
+  });
+
+  const { data: serviceCalls = [] } = useQuery({
+    queryKey: ["admin-service-calls"],
+    queryFn: async () => {
+      const { data } = await supabase.from("service_calls").select("*");
       return data || [];
     }
   });
@@ -312,6 +339,10 @@ export default function AdminDashboard() {
   const providerCount = Array.from(providerUserIds).filter(
     (id) => !adminUserIds.has(id)
   ).length;
+
+  const serviceCallByServiceId = new Map(
+    (serviceCalls as any[]).map((call: any) => [call.service_id, call])
+  );
 
   const providers = users.filter(
     (u: any) => providerUserIds.has(u.id) && !adminUserIds.has(u.id)
@@ -483,6 +514,41 @@ export default function AdminDashboard() {
     }
     toast({ title: "Service deleted" });
     queryClient.invalidateQueries({ queryKey: ["admin-services"] });
+  };
+
+  const handleCreateServiceRoom = async (serviceId: string) => {
+    if (!user) return;
+    const roomName = `service_${serviceId}`;
+    const { data, error } = await supabase
+      .from("service_calls")
+      .insert({
+        service_id: serviceId,
+        room_name: roomName,
+        created_by: user.id,
+        status: "created",
+      })
+      .select()
+      .single();
+
+    if (error) {
+      toast({ title: "Failed to create room", description: error.message, variant: "destructive" });
+      return;
+    }
+
+    queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
+    toast({ title: "Room created", description: "Join Room is now available for this service." });
+  };
+
+  const handleJoinServiceRoom = async (call: any) => {
+    if (call.status !== "active") {
+      await supabase
+        .from("service_calls")
+        .update({ status: "active" })
+        .eq("id", call.id);
+    }
+    setServiceCallRoom(call.room_name);
+    setServiceCallId(call.id);
+    setShowServiceCall(true);
   };
 
   const handleToggleBlockUser = async (userId: string, isBlocked: boolean) => {
@@ -903,15 +969,23 @@ const handleApproveService = async (id: string) => {
                   >
                     {updatingBookingId === b.id ? "Updating..." : "Update Status"}
                   </Button>
-                  <CallButton
-                    bookingId={b.id}
-                    serviceId={b.service_id}
-                    receiverId={b.seeker_id}
-                    receiverName="Seeker"
-                    initiatorRole="admin"
-                    size="sm"
-                    showLabel={true}
-                  />
+                  {serviceCallByServiceId.has(b.service_id) ? (
+                    <Button
+                      size="sm"
+                      variant="hero"
+                      onClick={() => handleJoinServiceRoom(serviceCallByServiceId.get(b.service_id))}
+                    >
+                      Join Room
+                    </Button>
+                  ) : (
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => handleCreateServiceRoom(b.service_id)}
+                    >
+                      Create Room
+                    </Button>
+                  )}
                 </div>
               </div>
             );
@@ -1023,70 +1097,6 @@ const handleApproveService = async (id: string) => {
             <span className="text-xs text-muted-foreground">Seeker → Admin support calls</span>
           </div>
 
-          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
-            <Input
-              placeholder="Enter room id to join"
-              value={manualSupportRoom}
-              onChange={(event) => setManualSupportRoom(event.target.value)}
-              className="sm:flex-1"
-            />
-            <div className="flex gap-2">
-              <Button
-                variant="outline"
-                onClick={() => {
-                  const room = manualSupportRoom.trim();
-                  if (!room) return;
-                  if (supportCallRequestId) {
-                    endRequest(supportCallRequestId);
-                  }
-                  setSupportCallRoom(room);
-                  setSupportCallRequestId(null);
-                  setShowSupportCall(true);
-                }}
-              >
-                Join Video Call
-              </Button>
-              <Button
-                variant="hero"
-                onClick={() => {
-                  const fallbackRoom = `support_admin_${Date.now()}`;
-                  const room = manualSupportRoom.trim() || fallbackRoom;
-                  if (supportCallRequestId) {
-                    endRequest(supportCallRequestId);
-                  }
-                  setSupportCallRoom(room);
-                  setSupportCallRequestId(null);
-                  setShowSupportCall(true);
-                }}
-              >
-                Start Video Call
-              </Button>
-            </div>
-          </div>
-          {supportCallRoom && (
-            <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-              <span>Room:</span>
-              <span className="font-mono text-foreground break-all">{supportCallRoom}</span>
-              <Button
-                size="sm"
-                variant="ghost"
-                onClick={async () => {
-                  try {
-                    await navigator.clipboard.writeText(supportCallRoom);
-                    toast({ title: "Room copied", description: supportCallRoom });
-                  } catch (error: any) {
-                    toast({
-                      title: "Copy failed",
-                      description: error?.message || "Could not copy room id",
-                      variant: "destructive",
-                    });
-                  }
-                }}
-              >
-                Copy
-              </Button>
-            </div>
-          )}
 
           {adminRequests.length === 0 ? (
             <p className="text-sm text-muted-foreground">No active call requests.</p>
@@ -1546,18 +1556,24 @@ const handleApproveService = async (id: string) => {
           }}
         />
       )}
-      {showSupportCall && supportCallRoom && !supportCallRequestId && (
+      {showServiceCall && serviceCallRoom && serviceCallId && (
         <VideoCallModal
-          roomName={supportCallRoom}
+          roomName={serviceCallRoom}
           displayName="Admin"
           showWaiting={false}
           onCallEnd={() => {
-            setShowSupportCall(false);
-            setSupportCallRoom(null);
+            supabase.from("service_calls").update({ status: "ended" }).eq("id", serviceCallId);
+            setShowServiceCall(false);
+            setServiceCallRoom(null);
+            setServiceCallId(null);
+            queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
           }}
           onClose={() => {
-            setShowSupportCall(false);
-            setSupportCallRoom(null);
+            supabase.from("service_calls").update({ status: "ended" }).eq("id", serviceCallId);
+            setShowServiceCall(false);
+            setServiceCallRoom(null);
+            setServiceCallId(null);
+            queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
           }}
         />
       )}

@@ -185,8 +185,6 @@ const SupportCenter = () => {
 
   const {
     activeRequest,
-    createRequestAsync,
-    createRequestLoading,
     endRequest,
     cancelRequest,
   } = useSupportCall();
@@ -494,19 +492,6 @@ const SupportCenter = () => {
     toast({ title: "Ticket updated", description: "Admin controls saved." });
   };
 
-  const handleCallAdmin = async () => {
-    if (!user) return;
-    try {
-      const request = await createRequestAsync();
-      if (request?.room_name) {
-        setSupportRoomName(request.room_name);
-      }
-      setShowSupportCall(true);
-      toast({ title: "Video call started", description: "Connecting..." });
-    } catch (error: any) {
-      toast({ title: "Call failed", description: error?.message || "Could not start call", variant: "destructive" });
-    }
-  };
 
   const handleJoinRoom = () => {
     const room = manualRoomName.trim();
@@ -571,19 +556,11 @@ const SupportCenter = () => {
 
         {!isAdmin && (
           <div className="mb-4 rounded-2xl border border-border/60 bg-secondary/20 p-4">
-            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div className="flex flex-col gap-3">
               <div>
                 <h2 className="text-base font-semibold text-foreground">Video Support</h2>
-                <p className="text-sm text-muted-foreground">Start or join a call instantly.</p>
+                <p className="text-sm text-muted-foreground">Join an admin room using the room id.</p>
               </div>
-              <Button
-                variant="hero"
-                className="w-full sm:w-auto"
-                onClick={handleCallAdmin}
-                disabled={createRequestLoading || Boolean(activeRequest && activeRequest.status !== "ended")}
-              >
-                {createRequestLoading ? "Starting..." : "Start Video Call"}
-              </Button>
             </div>
             <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
               <Input

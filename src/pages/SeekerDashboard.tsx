@@ -109,14 +109,11 @@ const SeekerDashboard = () => {
   const [pushEnabled, setPushEnabled] = useState(false);
   const [showVideoCall, setShowVideoCall] = useState(false);
   const [supportRoomName, setSupportRoomName] = useState("");
-  const [manualSupportRoom, setManualSupportRoom] = useState("");
   const handledRealtimeAlertKeysRef = useRef<Set<string>>(new Set());
   const lastKnownBookingStatusRef = useRef<Record<string, string>>({});
   const { unreadNotifications, unreadCount, markRead, markAllRead } = usePersistentNotifications(user?.id);
   const {
     activeRequest,
-    createRequestAsync,
-    createRequestLoading,
     cancelRequest,
     endRequest,
   } = useSupportCall();
@@ -207,32 +204,6 @@ const SeekerDashboard = () => {
     enabled: !!user,
   });
 
-  const handleStartSupportCall = async () => {
-    if (!user) return;
-    try {
-      const request = await createRequestAsync();
-      if (request?.room_name) {
-        setSupportRoomName(request.room_name);
-      }
-      setShowVideoCall(true);
-      toast({ title: "Video call started", description: "Connecting..." });
-    } catch (error: any) {
-      toast({ title: "Call failed", description: error?.message || "Could not start call", variant: "destructive" });
-    }
-  };
-
-  const handleJoinSupportRoom = () => {
-    const room = manualSupportRoom.trim();
-    if (!room) {
-      toast({ title: "Room ID required", description: "Enter a valid room id to join.", variant: "destructive" });
-      return;
-    }
-    if (activeRequest?.id) {
-      cancelRequest(activeRequest.id);
-    }
-    setSupportRoomName(room);
-    setShowVideoCall(true);
-  };
 
   const handleCopySupportRoom = async () => {
     if (!supportRoomName) return;
@@ -300,6 +271,27 @@ const SeekerDashboard = () => {
     retry: 3,
     retryDelay: (attemptIndex) => Math.min(1000 * 2 ** attemptIndex, 30000),
   });
+
+  const serviceIds = (bookings as any[])
+    .map((b) => b.service_id)
+    .filter(Boolean);
+
+  const { data: serviceCalls = [] } = useQuery({
+    queryKey: ["seeker-service-calls", serviceIds.join("|")],
+    queryFn: async () => {
+      if (serviceIds.length === 0) return [];
+      const { data } = await supabase
+        .from("service_calls")
+        .select("*")
+        .in("service_id", serviceIds);
+      return data || [];
+    },
+    enabled: serviceIds.length > 0,
+  });
+
+  const serviceCallByServiceId = new Map(
+    (serviceCalls as any[]).map((call: any) => [call.service_id, call])
+  );
 
   // Reviews: track which bookings the seeker has already reviewed
   const { data: myReviews = [] } = useQuery({
@@ -791,42 +783,17 @@ const SeekerDashboard = () => {
               </Button>
             </div>
 
-            <div className="mb-4 rounded-2xl border border-border/60 bg-secondary/20 p-4">
-              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                <div>
-                  <h3 className="text-base font-semibold text-foreground">Video Support</h3>
-                  <p className="text-sm text-muted-foreground">Start or join a call instantly.</p>
-                </div>
-                <Button
-                  variant="hero"
-                  className="w-full sm:w-auto"
-                  onClick={handleStartSupportCall}
-                  disabled={createRequestLoading || Boolean(activeRequest && activeRequest.status !== "ended")}
-                >
-                  {createRequestLoading ? "Starting..." : "Start Video Call"}
-                </Button>
-              </div>
-              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
-                <Input
-                  placeholder="Enter room id to join"
-                  value={manualSupportRoom}
-                  onChange={(event) => setManualSupportRoom(event.target.value)}
-                  className="sm:flex-1"
-                />
-                <Button variant="outline" className="w-full sm:w-auto" onClick={handleJoinSupportRoom}>
-                  Join Video Call
-                </Button>
-              </div>
-              {supportRoomName && (
-                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+            {supportRoomName && (
+              <div className="mb-4 rounded-2xl border border-border/60 bg-secondary/20 p-4">
+                <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
                   <span>Room:</span>
                   <span className="font-mono text-foreground break-all">{supportRoomName}</span>
                   <Button size="sm" variant="ghost" onClick={handleCopySupportRoom}>
                     Copy
                   </Button>
                 </div>
-              )}
-            </div>
+              </div>
+            )}
 
             {bookingsLoading && <p className="text-muted-foreground text-center py-4">Loading orders...</p>}
             
@@ -964,6 +931,26 @@ const SeekerDashboard = () => {
                             onClick={() => { setReviewingBookingId(order.id); setReviewRating(5); setReviewComment(""); }}
                           >
                             <Star className="w-3 h-3 mr-1" /> Review
+                          </Button>
+                        )}
+                        {serviceCallByServiceId.has(order.service_id) && (
+                          <Button
+                            size="sm"
+                            variant="hero"
+                            onClick={async () => {
+                              const call = serviceCallByServiceId.get(order.service_id);
+                              if (!call) return;
+                              if (call.status !== "active") {
+                                await supabase
+                                  .from("service_calls")
+                                  .update({ status: "active" })
+                                  .eq("id", call.id);
+                              }
+                              setSupportRoomName(call.room_name);
+                              setShowVideoCall(true);
+                            }}
+                          >
+                            Join Room
                           </Button>
                         )}
                         {normalizedStatus === "completed" && reviewedSet.has(order.id) && (
