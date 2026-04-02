@@ -838,7 +838,7 @@ const SeekerDashboard = () => {
                   const displayServiceId = toPublicNumericId(order.service_id);
                   return (
                   <div key={order.id} className="rounded-xl bg-secondary/30 hover:bg-secondary/50 transition-colors overflow-hidden">
-                    <div className="flex items-center justify-between p-4">
+                    <div className="flex flex-col gap-3 p-4 sm:flex-row sm:items-center sm:justify-between">
                       <div className="flex-1">
                         <div className="font-medium text-foreground flex items-center gap-2">
                           {(order.services as any)?.title || "Service"}
@@ -873,7 +873,7 @@ const SeekerDashboard = () => {
                           })}
                         </div>
                       </div>
-                      <div className="flex flex-col gap-2 w-full sm:w-auto sm:flex-row sm:items-center sm:flex-wrap sm:justify-end">
+                      <div className="flex w-full flex-col gap-2 sm:w-auto sm:flex-row sm:flex-wrap sm:items-center sm:justify-end">
                         <div className="flex flex-wrap items-center gap-2">
                           <span className={`text-xs px-3 py-1 rounded-full font-medium capitalize ${statusColors[normalizedStatus] || ""}`}>
                             {statusLabel(normalizedStatus)}
