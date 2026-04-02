@@ -514,15 +514,15 @@ const Hero = () => {
             initial={{ opacity: 0, y: 20 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: 1, duration: 0.6 }}
-            className="flex items-center justify-center gap-6"
+            className="flex w-full flex-col items-center justify-center gap-3 sm:flex-row sm:gap-6"
           >
-            <Link to="/register">
-              <Button variant="hero" size="lg" className="rounded-xl text-base px-8 h-12">
+            <Link to="/register" className="w-full sm:w-auto">
+              <Button variant="hero" size="lg" className="h-12 w-full rounded-xl px-8 text-base sm:w-auto">
                 Get Started <ArrowRight className="w-5 h-5 ml-1" />
               </Button>
             </Link>
-            <Link to="/register?role=provider">
-              <Button variant="glass" size="lg" className="rounded-xl text-base px-8 h-12">
+            <Link to="/register?role=provider" className="w-full sm:w-auto">
+              <Button variant="glass" size="lg" className="h-12 w-full rounded-xl px-8 text-base sm:w-auto">
                 Become a Provider
               </Button>
             </Link>
