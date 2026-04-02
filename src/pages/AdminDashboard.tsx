@@ -33,6 +33,7 @@ import CallButton from "@/components/videocall/CallButton";
 import CallIncomingDialog from "@/components/videocall/CallIncomingDialog";
 import VideoCallModal from "@/components/videocall/VideoCallModal";
 import { useVideoCall } from "@/hooks/useVideoCall";
+import { useSupportCall } from "@/hooks/useSupportCall";
 
 /* =========================================================
    ADMIN DASHBOARD
@@ -56,6 +57,9 @@ export default function AdminDashboard() {
   const [unresolvedProviderCount, setUnresolvedProviderCount] = useState(0);
   const [acceptedIncomingCall, setAcceptedIncomingCall] = useState<any | null>(null);
   const [showVideoCall, setShowVideoCall] = useState(false);
+  const [showSupportCall, setShowSupportCall] = useState(false);
+  const [supportCallRoom, setSupportCallRoom] = useState<string | null>(null);
+  const [supportCallRequestId, setSupportCallRequestId] = useState<string | null>(null);
   const [userFilter, setUserFilter] = useState<
     "active_seekers" | "active_providers" | "blocked_seekers" | "blocked_providers"
   >("active_seekers");
@@ -77,6 +81,13 @@ export default function AdminDashboard() {
     declineCallLoading,
     endCall,
   } = useVideoCall();
+
+  const {
+    adminRequests,
+    joinRequestAsync,
+    joinRequestLoading,
+    endRequest,
+  } = useSupportCall();
   // Auto-open video call modal for both users when call is active
   useEffect(() => {
     if (activeCall && activeCall.status === "active") {
@@ -1005,6 +1016,47 @@ const handleApproveService = async (id: string) => {
 
     return (
       <div className="space-y-6">
+        <div className="glass p-6">
+          <div className="flex items-center justify-between mb-4">
+            <h2 className="text-lg font-semibold">Active Call Requests</h2>
+            <span className="text-xs text-muted-foreground">Seeker → Admin support calls</span>
+          </div>
+
+          {adminRequests.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No active call requests.</p>
+          ) : (
+            <div className="space-y-3">
+              {adminRequests.map((req) => (
+                <div key={req.id} className="flex flex-wrap items-center justify-between gap-3 rounded-xl border border-border/40 bg-secondary/20 p-3">
+                  <div>
+                    <div className="text-sm font-semibold text-foreground">
+                      {getUserDisplayName(req.seeker_id)}
+                    </div>
+                    <div className="text-xs text-muted-foreground">
+                      Status: {req.status} · {new Date(req.created_at).toLocaleTimeString()}
+                    </div>
+                  </div>
+                  <Button
+                    size="sm"
+                    variant={req.status === "active" ? "outline" : "hero"}
+                    onClick={async () => {
+                      if (req.status !== "active") {
+                        await joinRequestAsync(req.id);
+                      }
+                      setSupportCallRoom(req.room_name);
+                      setSupportCallRequestId(req.id);
+                      setShowSupportCall(true);
+                    }}
+                    disabled={joinRequestLoading}
+                  >
+                    {req.status === "active" ? "Join Call" : "Join Call"}
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+
         {/* Tab Buttons */}
         <div className="flex gap-3">
           <Button
@@ -1375,6 +1427,25 @@ const handleApproveService = async (id: string) => {
             </Button>
           </div>
         </div>
+      )}
+
+      {showSupportCall && supportCallRoom && supportCallRequestId && (
+        <VideoCallModal
+          roomName={supportCallRoom}
+          displayName="Admin"
+          onCallEnd={(durationSeconds) => {
+            endRequest(supportCallRequestId);
+            setShowSupportCall(false);
+            setSupportCallRoom(null);
+            setSupportCallRequestId(null);
+          }}
+          onClose={() => {
+            endRequest(supportCallRequestId);
+            setShowSupportCall(false);
+            setSupportCallRoom(null);
+            setSupportCallRequestId(null);
+          }}
+        />
       )}
 
       {/* Incoming Call Dialog */}

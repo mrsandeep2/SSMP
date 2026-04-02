@@ -16,6 +16,8 @@ import {
 } from "@/components/ui/select";
 import { useToast } from "@/hooks/use-toast";
 import { serviceCategories } from "@/data/marketplace";
+import { useSupportCall } from "@/hooks/useSupportCall";
+import VideoCallModal from "@/components/videocall/VideoCallModal";
 
 type TicketType = "help" | "complaint" | "feedback";
 
@@ -177,6 +179,15 @@ const SupportCenter = () => {
   const [adminStatus, setAdminStatus] = useState<SupportTicket["status"]>("open");
   const [adminPriority, setAdminPriority] = useState<SupportTicket["priority"]>("normal");
   const [savingAdminControls, setSavingAdminControls] = useState(false);
+  const [showSupportCall, setShowSupportCall] = useState(false);
+
+  const {
+    activeRequest,
+    createRequestAsync,
+    createRequestLoading,
+    endRequest,
+    cancelRequest,
+  } = useSupportCall();
 
   const isAdmin = role === "admin";
 
@@ -351,6 +362,14 @@ const SupportCenter = () => {
     setAdminPriority(activeTicket.priority);
   }, [activeTicket?.id]);
 
+  useEffect(() => {
+    if (activeRequest && (activeRequest.status === "waiting" || activeRequest.status === "active")) {
+      setShowSupportCall(true);
+      return;
+    }
+    setShowSupportCall(false);
+  }, [activeRequest?.id, activeRequest?.status]);
+
   const createTicket = async () => {
     if (!user) return;
     if (!ticketDescription.trim()) {
@@ -468,6 +487,27 @@ const SupportCenter = () => {
     toast({ title: "Ticket updated", description: "Admin controls saved." });
   };
 
+  const handleCallAdmin = async () => {
+    if (!user) return;
+    try {
+      await createRequestAsync();
+      setShowSupportCall(true);
+      toast({ title: "Calling admin", description: "Waiting for admin to join..." });
+    } catch (error: any) {
+      toast({ title: "Call failed", description: error?.message || "Could not start call", variant: "destructive" });
+    }
+  };
+
+  const handleSupportCallEnd = (durationSeconds: number) => {
+    if (activeRequest?.id) {
+      endRequest(activeRequest.id);
+    }
+    toast({
+      title: "Call ended",
+      description: `Call duration: ${Math.floor(durationSeconds / 60)}m ${durationSeconds % 60}s`,
+    });
+  };
+
   if (loading) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -491,6 +531,28 @@ const SupportCenter = () => {
             Back to Dashboard
           </Button>
         </div>
+
+        {!isAdmin && (
+          <div className="mb-4 rounded-2xl border border-border/60 bg-secondary/20 p-4">
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+              <div>
+                <h2 className="text-base font-semibold text-foreground">Need live help?</h2>
+                <p className="text-sm text-muted-foreground">Start a video call with admin for urgent support.</p>
+              </div>
+              <Button
+                variant="hero"
+                className="w-full sm:w-auto"
+                onClick={handleCallAdmin}
+                disabled={createRequestLoading || Boolean(activeRequest && activeRequest.status !== "ended")}
+              >
+                {createRequestLoading ? "Calling..." : "Call Admin"}
+              </Button>
+            </div>
+            {activeRequest?.status === "waiting" && (
+              <p className="mt-2 text-xs text-muted-foreground">Waiting for admin to join...</p>
+            )}
+          </div>
+        )}
 
         {role !== "admin" && (
           <div className="mb-4 rounded-2xl border border-border/60 bg-secondary/20 p-4">
@@ -820,6 +882,20 @@ const SupportCenter = () => {
           </div>
         </div>
       </div>
+
+      {showSupportCall && activeRequest && (
+        <VideoCallModal
+          roomName={activeRequest.room_name}
+          displayName="Seeker"
+          onCallEnd={handleSupportCallEnd}
+          onClose={() => {
+            setShowSupportCall(false);
+            if (activeRequest.status === "waiting") {
+              cancelRequest(activeRequest.id);
+            }
+          }}
+        />
+      )}
     </div>
   );
 };
