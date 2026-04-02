@@ -180,6 +180,8 @@ const SupportCenter = () => {
   const [adminPriority, setAdminPriority] = useState<SupportTicket["priority"]>("normal");
   const [savingAdminControls, setSavingAdminControls] = useState(false);
   const [showSupportCall, setShowSupportCall] = useState(false);
+  const [supportRoomName, setSupportRoomName] = useState("");
+  const [manualRoomName, setManualRoomName] = useState("");
 
   const {
     activeRequest,
@@ -364,11 +366,16 @@ const SupportCenter = () => {
 
   useEffect(() => {
     if (activeRequest && (activeRequest.status === "waiting" || activeRequest.status === "active")) {
+      if (!supportRoomName) {
+        setSupportRoomName(activeRequest.room_name);
+      }
       setShowSupportCall(true);
       return;
     }
-    setShowSupportCall(false);
-  }, [activeRequest?.id, activeRequest?.status]);
+    if (!supportRoomName) {
+      setShowSupportCall(false);
+    }
+  }, [activeRequest?.id, activeRequest?.status, supportRoomName]);
 
   const createTicket = async () => {
     if (!user) return;
@@ -490,11 +497,41 @@ const SupportCenter = () => {
   const handleCallAdmin = async () => {
     if (!user) return;
     try {
-      await createRequestAsync();
+      const request = await createRequestAsync();
+      if (request?.room_name) {
+        setSupportRoomName(request.room_name);
+      }
       setShowSupportCall(true);
-      toast({ title: "Calling admin", description: "Waiting for admin to join..." });
+      toast({ title: "Video call started", description: "Connecting..." });
     } catch (error: any) {
       toast({ title: "Call failed", description: error?.message || "Could not start call", variant: "destructive" });
+    }
+  };
+
+  const handleJoinRoom = () => {
+    const room = manualRoomName.trim();
+    if (!room) {
+      toast({ title: "Room ID required", description: "Enter a valid room id to join.", variant: "destructive" });
+      return;
+    }
+    if (activeRequest?.id) {
+      cancelRequest(activeRequest.id);
+    }
+    setSupportRoomName(room);
+    setShowSupportCall(true);
+  };
+
+  const handleCopyRoom = async () => {
+    if (!supportRoomName) return;
+    try {
+      await navigator.clipboard.writeText(supportRoomName);
+      toast({ title: "Room copied", description: supportRoomName });
+    } catch (error: any) {
+      toast({
+        title: "Copy failed",
+        description: error?.message || "Could not copy room id",
+        variant: "destructive",
+      });
     }
   };
 
@@ -536,8 +573,8 @@ const SupportCenter = () => {
           <div className="mb-4 rounded-2xl border border-border/60 bg-secondary/20 p-4">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
               <div>
-                <h2 className="text-base font-semibold text-foreground">Need live help?</h2>
-                <p className="text-sm text-muted-foreground">Start a video call with admin for urgent support.</p>
+                <h2 className="text-base font-semibold text-foreground">Video Support</h2>
+                <p className="text-sm text-muted-foreground">Start or join a call instantly.</p>
               </div>
               <Button
                 variant="hero"
@@ -545,11 +582,28 @@ const SupportCenter = () => {
                 onClick={handleCallAdmin}
                 disabled={createRequestLoading || Boolean(activeRequest && activeRequest.status !== "ended")}
               >
-                {createRequestLoading ? "Calling..." : "Call Admin"}
+                {createRequestLoading ? "Starting..." : "Start Video Call"}
               </Button>
             </div>
-            {activeRequest?.status === "waiting" && (
-              <p className="mt-2 text-xs text-muted-foreground">Waiting for admin to join...</p>
+            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+              <Input
+                placeholder="Enter room id to join"
+                value={manualRoomName}
+                onChange={(event) => setManualRoomName(event.target.value)}
+                className="sm:flex-1"
+              />
+              <Button variant="outline" className="w-full sm:w-auto" onClick={handleJoinRoom}>
+                Join Video Call
+              </Button>
+            </div>
+            {supportRoomName && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                <span>Room:</span>
+                <span className="font-mono text-foreground break-all">{supportRoomName}</span>
+                <Button size="sm" variant="ghost" onClick={handleCopyRoom}>
+                  Copy
+                </Button>
+              </div>
             )}
           </div>
         )}
@@ -883,16 +937,18 @@ const SupportCenter = () => {
         </div>
       </div>
 
-      {showSupportCall && activeRequest && (
+      {showSupportCall && supportRoomName && (
         <VideoCallModal
-          roomName={activeRequest.room_name}
+          roomName={supportRoomName}
           displayName="Seeker"
+          showWaiting={false}
           onCallEnd={handleSupportCallEnd}
           onClose={() => {
             setShowSupportCall(false);
-            if (activeRequest.status === "waiting") {
+            if (activeRequest?.room_name === supportRoomName && activeRequest.status === "waiting") {
               cancelRequest(activeRequest.id);
             }
+            setSupportRoomName("");
           }}
         />
       )}

@@ -18,10 +18,8 @@ import { getSubscriptionStatus, registerBackgroundPushForCurrentUser } from "@/l
 import RealtimeNotificationBell from "@/components/notifications/RealtimeNotificationBell";
 import { usePersistentNotifications } from "@/hooks/usePersistentNotifications";
 import { toPublicNumericId } from "@/lib/utils";
-import CallButton from "@/components/videocall/CallButton";
-import CallIncomingDialog from "@/components/videocall/CallIncomingDialog";
 import VideoCallModal from "@/components/videocall/VideoCallModal";
-import { useVideoCall } from "@/hooks/useVideoCall";
+import { useSupportCall } from "@/hooks/useSupportCall";
 
 const statusColors: Record<string, string> = {
   pending: "bg-warning/20 text-warning",
@@ -109,30 +107,19 @@ const SeekerDashboard = () => {
   const [submittingReview, setSubmittingReview] = useState(false);
   const [notificationPermission, setNotificationPermission] = useState<"default" | "granted" | "denied" | "unsupported">("default");
   const [pushEnabled, setPushEnabled] = useState(false);
-  const [acceptedIncomingCall, setAcceptedIncomingCall] = useState<any | null>(null);
   const [showVideoCall, setShowVideoCall] = useState(false);
+  const [supportRoomName, setSupportRoomName] = useState("");
+  const [manualSupportRoom, setManualSupportRoom] = useState("");
   const handledRealtimeAlertKeysRef = useRef<Set<string>>(new Set());
   const lastKnownBookingStatusRef = useRef<Record<string, string>>({});
   const { unreadNotifications, unreadCount, markRead, markAllRead } = usePersistentNotifications(user?.id);
   const {
-    incomingCalls,
-    pendingCall,
-    activeCall,
-    acceptCall,
-    acceptCallLoading,
-    declineCall,
-    declineCallLoading,
-    endCall,
-  } = useVideoCall();
-  // Auto-open video call modal for both users when call is active
-  useEffect(() => {
-    if (activeCall && activeCall.status === "active") {
-      setAcceptedIncomingCall(activeCall);
-      setShowVideoCall(true);
-    } else {
-      setShowVideoCall(false);
-    }
-  }, [activeCall]);
+    activeRequest,
+    createRequestAsync,
+    createRequestLoading,
+    cancelRequest,
+    endRequest,
+  } = useSupportCall();
 
   useEffect(() => {
     if (!loading && !user) navigate("/login");
@@ -220,20 +207,46 @@ const SeekerDashboard = () => {
     enabled: !!user,
   });
 
-  // Fetch admin user ID for video calls
-  const { data: adminUser } = useQuery({
-    queryKey: ["admin-user"],
-    queryFn: async () => {
-      const { data } = await supabase
-        .from("user_roles")
-        .select("user_id")
-        .eq("role", "admin")
-        .limit(1)
-        .single();
-      return data?.user_id || null;
-    },
-    staleTime: 3600000, // Cache for 1 hour
-  });
+  const handleStartSupportCall = async () => {
+    if (!user) return;
+    try {
+      const request = await createRequestAsync();
+      if (request?.room_name) {
+        setSupportRoomName(request.room_name);
+      }
+      setShowVideoCall(true);
+      toast({ title: "Video call started", description: "Connecting..." });
+    } catch (error: any) {
+      toast({ title: "Call failed", description: error?.message || "Could not start call", variant: "destructive" });
+    }
+  };
+
+  const handleJoinSupportRoom = () => {
+    const room = manualSupportRoom.trim();
+    if (!room) {
+      toast({ title: "Room ID required", description: "Enter a valid room id to join.", variant: "destructive" });
+      return;
+    }
+    if (activeRequest?.id) {
+      cancelRequest(activeRequest.id);
+    }
+    setSupportRoomName(room);
+    setShowVideoCall(true);
+  };
+
+  const handleCopySupportRoom = async () => {
+    if (!supportRoomName) return;
+    try {
+      await navigator.clipboard.writeText(supportRoomName);
+      toast({ title: "Room copied", description: supportRoomName });
+    } catch (error: any) {
+      toast({
+        title: "Copy failed",
+        description: error?.message || "Could not copy room id",
+        variant: "destructive",
+      });
+    }
+  };
 
   useEffect(() => {
     if (profile) {
@@ -778,6 +791,43 @@ const SeekerDashboard = () => {
               </Button>
             </div>
 
+            <div className="mb-4 rounded-2xl border border-border/60 bg-secondary/20 p-4">
+              <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                <div>
+                  <h3 className="text-base font-semibold text-foreground">Video Support</h3>
+                  <p className="text-sm text-muted-foreground">Start or join a call instantly.</p>
+                </div>
+                <Button
+                  variant="hero"
+                  className="w-full sm:w-auto"
+                  onClick={handleStartSupportCall}
+                  disabled={createRequestLoading || Boolean(activeRequest && activeRequest.status !== "ended")}
+                >
+                  {createRequestLoading ? "Starting..." : "Start Video Call"}
+                </Button>
+              </div>
+              <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:items-center">
+                <Input
+                  placeholder="Enter room id to join"
+                  value={manualSupportRoom}
+                  onChange={(event) => setManualSupportRoom(event.target.value)}
+                  className="sm:flex-1"
+                />
+                <Button variant="outline" className="w-full sm:w-auto" onClick={handleJoinSupportRoom}>
+                  Join Video Call
+                </Button>
+              </div>
+              {supportRoomName && (
+                <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+                  <span>Room:</span>
+                  <span className="font-mono text-foreground break-all">{supportRoomName}</span>
+                  <Button size="sm" variant="ghost" onClick={handleCopySupportRoom}>
+                    Copy
+                  </Button>
+                </div>
+              )}
+            </div>
+
             {bookingsLoading && <p className="text-muted-foreground text-center py-4">Loading orders...</p>}
             
             {bookingsError && (
@@ -916,17 +966,6 @@ const SeekerDashboard = () => {
                             <Star className="w-3 h-3 mr-1" /> Review
                           </Button>
                         )}
-                        {normalizedStatus === "completed" && adminUser && (
-                          <CallButton
-                            bookingId={order.id}
-                            serviceId={order.service_id}
-                            receiverId={adminUser}
-                            receiverName="Admin"
-                            initiatorRole="seeker"
-                            size="sm"
-                            showLabel={true}
-                          />
-                        )}
                         {normalizedStatus === "completed" && reviewedSet.has(order.id) && (
                           <span className="text-xs text-muted-foreground flex items-center gap-1">
                             <span className="flex items-center gap-0.5">
@@ -1062,40 +1101,23 @@ const SeekerDashboard = () => {
             </div>
           )}
 
-          {/* Incoming Call Dialog */}
-          <CallIncomingDialog
-            call={pendingCall || (incomingCalls.length > 0 ? incomingCalls[0] : null)}
-            onAccept={() => {
-              const targetCall = pendingCall || (incomingCalls.length > 0 ? incomingCalls[0] : null);
-              if (targetCall) {
-                acceptCall(targetCall.id, {
-                  onSuccess: (updated: any) => {
-                    setAcceptedIncomingCall(updated);
-                  },
-                });
-              }
-            }}
-            onDecline={() => {
-              const targetCall = pendingCall || (incomingCalls.length > 0 ? incomingCalls[0] : null);
-              if (targetCall) {
-                declineCall({ callId: targetCall.id, reason: "User declined" });
-              }
-            }}
-            acceptLoading={acceptCallLoading}
-            declineLoading={declineCallLoading}
-            initiatorName="Admin"
-          />
-          {showVideoCall && acceptedIncomingCall && (
+          {showVideoCall && supportRoomName && (
             <VideoCallModal
-              roomName={acceptedIncomingCall.room_name}
+              roomName={supportRoomName}
               displayName="Seeker"
+              showWaiting={false}
               onCallEnd={(durationSeconds) => {
-                endCall({ callId: acceptedIncomingCall.id, duration: durationSeconds });
-                setAcceptedIncomingCall(null);
+                if (activeRequest?.id) {
+                  endRequest(activeRequest.id);
+                }
+                setSupportRoomName("");
                 setShowVideoCall(false);
               }}
               onClose={() => {
-                setAcceptedIncomingCall(null);
+                if (activeRequest?.id && activeRequest.status === "waiting") {
+                  cancelRequest(activeRequest.id);
+                }
+                setSupportRoomName("");
                 setShowVideoCall(false);
               }}
             />

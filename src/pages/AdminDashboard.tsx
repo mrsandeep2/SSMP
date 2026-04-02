@@ -60,6 +60,7 @@ export default function AdminDashboard() {
   const [showSupportCall, setShowSupportCall] = useState(false);
   const [supportCallRoom, setSupportCallRoom] = useState<string | null>(null);
   const [supportCallRequestId, setSupportCallRequestId] = useState<string | null>(null);
+  const [manualSupportRoom, setManualSupportRoom] = useState("");
   const [userFilter, setUserFilter] = useState<
     "active_seekers" | "active_providers" | "blocked_seekers" | "blocked_providers"
   >("active_seekers");
@@ -1022,6 +1023,71 @@ const handleApproveService = async (id: string) => {
             <span className="text-xs text-muted-foreground">Seeker → Admin support calls</span>
           </div>
 
+          <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center">
+            <Input
+              placeholder="Enter room id to join"
+              value={manualSupportRoom}
+              onChange={(event) => setManualSupportRoom(event.target.value)}
+              className="sm:flex-1"
+            />
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                onClick={() => {
+                  const room = manualSupportRoom.trim();
+                  if (!room) return;
+                  if (supportCallRequestId) {
+                    endRequest(supportCallRequestId);
+                  }
+                  setSupportCallRoom(room);
+                  setSupportCallRequestId(null);
+                  setShowSupportCall(true);
+                }}
+              >
+                Join Video Call
+              </Button>
+              <Button
+                variant="hero"
+                onClick={() => {
+                  const fallbackRoom = `support_admin_${Date.now()}`;
+                  const room = manualSupportRoom.trim() || fallbackRoom;
+                  if (supportCallRequestId) {
+                    endRequest(supportCallRequestId);
+                  }
+                  setSupportCallRoom(room);
+                  setSupportCallRequestId(null);
+                  setShowSupportCall(true);
+                }}
+              >
+                Start Video Call
+              </Button>
+            </div>
+          </div>
+          {supportCallRoom && (
+            <div className="mb-4 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+              <span>Room:</span>
+              <span className="font-mono text-foreground break-all">{supportCallRoom}</span>
+              <Button
+                size="sm"
+                variant="ghost"
+                onClick={async () => {
+                  try {
+                    await navigator.clipboard.writeText(supportCallRoom);
+                    toast({ title: "Room copied", description: supportCallRoom });
+                  } catch (error: any) {
+                    toast({
+                      title: "Copy failed",
+                      description: error?.message || "Could not copy room id",
+                      variant: "destructive",
+                    });
+                  }
+                }}
+              >
+                Copy
+              </Button>
+            </div>
+          )}
+
           {adminRequests.length === 0 ? (
             <p className="text-sm text-muted-foreground">No active call requests.</p>
           ) : (
@@ -1035,22 +1101,54 @@ const handleApproveService = async (id: string) => {
                     <div className="text-xs text-muted-foreground">
                       Status: {req.status} · {new Date(req.created_at).toLocaleTimeString()}
                     </div>
+                    <div className="text-[11px] text-muted-foreground font-mono break-all">
+                      {req.room_name}
+                    </div>
                   </div>
-                  <Button
-                    size="sm"
-                    variant={req.status === "active" ? "outline" : "hero"}
-                    onClick={async () => {
-                      if (req.status !== "active") {
-                        await joinRequestAsync(req.id);
-                      }
-                      setSupportCallRoom(req.room_name);
-                      setSupportCallRequestId(req.id);
-                      setShowSupportCall(true);
-                    }}
-                    disabled={joinRequestLoading}
-                  >
-                    {req.status === "active" ? "Join Call" : "Join Call"}
-                  </Button>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={async () => {
+                        try {
+                          await navigator.clipboard.writeText(req.room_name);
+                          toast({ title: "Room copied", description: req.room_name });
+                        } catch (error: any) {
+                          toast({
+                            title: "Copy failed",
+                            description: error?.message || "Could not copy room id",
+                            variant: "destructive",
+                          });
+                        }
+                      }}
+                    >
+                      Copy
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant={req.status === "active" ? "outline" : "hero"}
+                      onClick={async () => {
+                        setSupportCallRoom(req.room_name);
+                        setSupportCallRequestId(req.id);
+                        setShowSupportCall(true);
+
+                        if (req.status !== "active") {
+                          try {
+                            await joinRequestAsync(req.id);
+                          } catch (error: any) {
+                            toast({
+                              title: "Failed to join call",
+                              description: error?.message || "Unable to activate call",
+                              variant: "destructive",
+                            });
+                          }
+                        }
+                      }}
+                      disabled={joinRequestLoading}
+                    >
+                      Join Call
+                    </Button>
+                  </div>
                 </div>
               ))}
             </div>
@@ -1433,6 +1531,7 @@ const handleApproveService = async (id: string) => {
         <VideoCallModal
           roomName={supportCallRoom}
           displayName="Admin"
+          showWaiting={false}
           onCallEnd={(durationSeconds) => {
             endRequest(supportCallRequestId);
             setShowSupportCall(false);
@@ -1444,6 +1543,21 @@ const handleApproveService = async (id: string) => {
             setShowSupportCall(false);
             setSupportCallRoom(null);
             setSupportCallRequestId(null);
+          }}
+        />
+      )}
+      {showSupportCall && supportCallRoom && !supportCallRequestId && (
+        <VideoCallModal
+          roomName={supportCallRoom}
+          displayName="Admin"
+          showWaiting={false}
+          onCallEnd={() => {
+            setShowSupportCall(false);
+            setSupportCallRoom(null);
+          }}
+          onClose={() => {
+            setShowSupportCall(false);
+            setSupportCallRoom(null);
           }}
         />
       )}

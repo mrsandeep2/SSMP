@@ -9,6 +9,7 @@ interface VideoCallModalProps {
   displayName: string;
   onCallEnd: (durationSeconds: number) => void;
   onClose: () => void;
+  showWaiting?: boolean;
 }
 
 declare global {
@@ -22,6 +23,7 @@ const VideoCallModal = ({
   displayName,
   onCallEnd,
   onClose,
+  showWaiting = true,
 }: VideoCallModalProps) => {
   const containerRef = useRef<HTMLDivElement>(null);
   const jitsiRef = useRef<any>(null);
@@ -212,6 +214,19 @@ const VideoCallModal = ({
     return `${mins}:${secs}`;
   };
 
+  const handleCopyRoom = async () => {
+    try {
+      await navigator.clipboard.writeText(roomName);
+      toast({ title: "Room copied", description: roomName });
+    } catch (error: any) {
+      toast({
+        title: "Copy failed",
+        description: error?.message || "Could not copy room id",
+        variant: "destructive",
+      });
+    }
+  };
+
   const handleCallEnd = () => {
     const durationSeconds = Math.floor(
       (Date.now() - callStartTimeRef.current) / 1000
@@ -286,11 +301,14 @@ const VideoCallModal = ({
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-sm font-medium">Video Call Active</span>
             <span className="text-xs text-muted-foreground">{formatDuration(elapsedSeconds)}</span>
-            {remoteParticipantCount === 0 && (
+            {showWaiting && remoteParticipantCount === 0 && (
               <span className="text-xs text-amber-400">Waiting for other user...</span>
             )}
           </div>
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={handleCopyRoom} className="gap-2">
+              Room ID
+            </Button>
             <Button size="sm" variant="outline" onClick={toggleAudio} className="gap-2">
               {isAudioMuted ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
               {isAudioMuted ? "Unmute" : "Mute"}
