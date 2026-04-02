@@ -299,8 +299,8 @@ const VideoCallModal = ({
         className="fixed inset-0 z-50 bg-black flex flex-col"
       >
         {/* Header */}
-        <div className="bg-background/95 backdrop-blur-sm border-b border-border p-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
+        <div className="bg-background/95 backdrop-blur-sm border-b border-border p-3 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-wrap items-center gap-2">
             <div className="w-2 h-2 rounded-full bg-green-500 animate-pulse" />
             <span className="text-sm font-medium">Video Call Active</span>
             <span className="text-xs text-muted-foreground">{formatDuration(elapsedSeconds)}</span>
@@ -308,7 +308,7 @@ const VideoCallModal = ({
               <span className="text-xs text-amber-400">Waiting for other user...</span>
             )}
           </div>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Button size="sm" variant="outline" onClick={handleCopyRoom} className="gap-2">
               Room ID
             </Button>
@@ -320,7 +320,13 @@ const VideoCallModal = ({
               {isVideoMuted ? <VideoOff className="w-4 h-4" /> : <Video className="w-4 h-4" />}
               {isVideoMuted ? "Camera On" : "Camera Off"}
             </Button>
-            <Button size="sm" variant="outline" onClick={switchCamera} disabled={switchingCamera} className="gap-2">
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={switchCamera}
+              disabled={switchingCamera}
+              className="gap-2 hidden sm:inline-flex"
+            >
               <SwitchCamera className="w-4 h-4" />
               {switchingCamera ? "Switching..." : "Flip Camera"}
             </Button>
@@ -328,7 +334,7 @@ const VideoCallModal = ({
               size="sm"
               variant="destructive"
               onClick={handleCallEnd}
-              className="gap-2"
+              className="gap-2 w-full sm:w-auto"
             >
               <PhoneOff className="w-4 h-4" />
               End Call
