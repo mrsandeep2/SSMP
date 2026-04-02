@@ -64,6 +64,39 @@ export type Database = {
           },
         ]
       }
+      mobile_users: {
+        Row: {
+          created_at: string
+          firebase_uid: string
+          is_blocked: boolean
+          last_login_at: string
+          name: string | null
+          phone: string
+          role: Database["public"]["Enums"]["app_role"]
+          updated_at: string
+        }
+        Insert: {
+          created_at?: string
+          firebase_uid: string
+          is_blocked?: boolean
+          last_login_at?: string
+          name?: string | null
+          phone: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+        }
+        Update: {
+          created_at?: string
+          firebase_uid?: string
+          is_blocked?: boolean
+          last_login_at?: string
+          name?: string | null
+          phone?: string
+          role?: Database["public"]["Enums"]["app_role"]
+          updated_at?: string
+        }
+        Relationships: []
+      }
       profiles: {
         Row: {
           avatar_url: string | null

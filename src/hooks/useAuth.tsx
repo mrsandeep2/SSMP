@@ -30,6 +30,14 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
     setRole(data?.role ?? null);
   };
 
+  const handleStaleRefreshToken = async () => {
+    // Clear invalid local auth state to avoid repeated refresh-token errors.
+    await supabase.auth.signOut({ scope: "local" });
+    setSession(null);
+    setUser(null);
+    setRole(null);
+  };
+
   useEffect(() => {
     const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
       setSession(session);
@@ -45,7 +53,13 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       setLoading(false);
     });
 
-    supabase.auth.getSession().then(({ data: { session } }) => {
+    supabase.auth.getSession().then(async ({ data: { session }, error }) => {
+      if (error && /refresh token/i.test(error.message)) {
+        await handleStaleRefreshToken();
+        setLoading(false);
+        return;
+      }
+
       setSession(session);
       setUser(session?.user ?? null);
       if (session?.user) {
