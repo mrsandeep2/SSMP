@@ -56,6 +56,9 @@ export default function AdminDashboard() {
   const [unresolvedProviderCount, setUnresolvedProviderCount] = useState(0);
   const [acceptedIncomingCall, setAcceptedIncomingCall] = useState<any | null>(null);
   const [showVideoCall, setShowVideoCall] = useState(false);
+  const [userFilter, setUserFilter] = useState<
+    "active_seekers" | "active_providers" | "blocked_seekers" | "blocked_providers"
+  >("active_seekers");
   const [editFields, setEditFields] = useState({
     title: "",
     description: "",
@@ -304,6 +307,26 @@ export default function AdminDashboard() {
 
   // Non-admin users only (seekers + providers)
   const nonAdminUsers = users.filter((u: any) => !adminUserIds.has(u.id));
+
+  const roleByUserId = userRoles.reduce((acc: Map<string, Set<string>>, row: any) => {
+    if (!acc.has(row.user_id)) acc.set(row.user_id, new Set());
+    acc.get(row.user_id)!.add(row.role);
+    return acc;
+  }, new Map());
+
+  const getPrimaryRole = (userId: string) =>
+    roleByUserId.get(userId)?.has("provider") ? "provider" : "seeker";
+
+  const getUserStatus = (u: any) => (u.is_blocked ? "blocked" : "active");
+
+  const filteredUsers = nonAdminUsers.filter((u: any) => {
+    const role = getPrimaryRole(u.id);
+    const status = getUserStatus(u);
+    if (userFilter === "active_seekers") return role === "seeker" && status === "active";
+    if (userFilter === "active_providers") return role === "provider" && status === "active";
+    if (userFilter === "blocked_seekers") return role === "seeker" && status === "blocked";
+    return role === "provider" && status === "blocked";
+  });
 
   const onlineProviderCount = users.filter(
     (u: any) => providerUserIds.has(u.id) && !adminUserIds.has(u.id) && (u as any).is_available
@@ -668,37 +691,74 @@ const handleApproveService = async (id: string) => {
 
   const renderUsers = () => (
     <div className="glass p-6">
-      <h2 className="text-lg font-semibold mb-4">All Users</h2>
-      {nonAdminUsers.map((user: any) => (
-        <div
-          key={user.id}
-          className="mb-3 text-sm flex items-center justify-between"
-        >
-          <div>
-            <div className="text-foreground">{user.email}</div>
-            <div className="text-xs text-muted-foreground">
-              Status: {user.is_blocked ? "Blocked" : "Active"}
-            </div>
-          </div>
+      <div className="flex flex-wrap items-center justify-between gap-3 mb-4">
+        <h2 className="text-lg font-semibold">Users</h2>
+        <div className="flex flex-wrap gap-2">
           <Button
             size="sm"
-            variant={user.is_blocked ? "outline" : "destructive"}
-            onClick={() => handleToggleBlockUser(user.id, user.is_blocked)}
+            variant={userFilter === "active_seekers" ? "hero" : "outline"}
+            onClick={() => setUserFilter("active_seekers")}
           >
-            {user.is_blocked ? (
-              <>
-                <CheckCircle2 className="w-3 h-3 mr-1" />
-                Unblock
-              </>
-            ) : (
-              <>
-                <Ban className="w-3 h-3 mr-1" />
-                Block
-              </>
-            )}
+            Active Seekers
+          </Button>
+          <Button
+            size="sm"
+            variant={userFilter === "active_providers" ? "hero" : "outline"}
+            onClick={() => setUserFilter("active_providers")}
+          >
+            Active Providers
+          </Button>
+          <Button
+            size="sm"
+            variant={userFilter === "blocked_seekers" ? "hero" : "outline"}
+            onClick={() => setUserFilter("blocked_seekers")}
+          >
+            Blocked Seekers
+          </Button>
+          <Button
+            size="sm"
+            variant={userFilter === "blocked_providers" ? "hero" : "outline"}
+            onClick={() => setUserFilter("blocked_providers")}
+          >
+            Blocked Providers
           </Button>
         </div>
-      ))}
+      </div>
+
+      {filteredUsers.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No users found for this filter.</p>
+      ) : (
+        filteredUsers.map((user: any) => (
+          <div
+            key={user.id}
+            className="mb-3 text-sm flex items-center justify-between"
+          >
+            <div>
+              <div className="text-foreground">{user.email}</div>
+              <div className="text-xs text-muted-foreground">
+                Status: {getUserStatus(user) === "blocked" ? "Blocked" : "Active"}
+              </div>
+            </div>
+            <Button
+              size="sm"
+              variant={user.is_blocked ? "outline" : "destructive"}
+              onClick={() => handleToggleBlockUser(user.id, user.is_blocked)}
+            >
+              {user.is_blocked ? (
+                <>
+                  <CheckCircle2 className="w-3 h-3 mr-1" />
+                  Unblock
+                </>
+              ) : (
+                <>
+                  <Ban className="w-3 h-3 mr-1" />
+                  Block
+                </>
+              )}
+            </Button>
+          </div>
+        ))
+      )}
     </div>
   );
 
@@ -752,21 +812,6 @@ const handleApproveService = async (id: string) => {
       </div>
     );
   };
-
-  /* =========================================================
-     RENDER PROVIDERS
-  ========================================================= */
-
-  const renderProviders = () => (
-    <div className="glass p-6">
-      <h2 className="text-lg font-semibold mb-4">Providers</h2>
-      {providers.map((provider: any) => (
-        <div key={provider.id} className="mb-2 text-sm text-muted-foreground">
-          {provider.email}
-        </div>
-      ))}
-    </div>
-  );
 
   const renderBookings = () => (
     <div className="glass p-6">
@@ -1160,26 +1205,38 @@ const handleApproveService = async (id: string) => {
 
       {/* Tabs */}
       <div className="flex flex-wrap gap-3">
-        {["overview", "approvals", "services", "users", "providers", "bookings", "live", "support"].map((tab) => {
+        {["overview", "approvals", "services", "users", "bookings", "live", "support"].map((tab) => {
           const totalUnresolved = unresolvedSeekerCount + unresolvedProviderCount;
           const showBadge = tab === "support" && totalUnresolved > 0;
+          const label = tab.charAt(0).toUpperCase() + tab.slice(1);
           
           return (
             <Button
               key={tab}
               variant={activeTab === tab ? "default" : "outline"}
               onClick={() => setActiveTab(tab)}
-              className={`relative ${tab === "live" ? "" : ""}`}
+              className={`relative overflow-visible ${tab === "live" ? "" : ""}`}
             >
               {tab === "live" && (
                 <span className="absolute -top-1 -right-1 w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+              )}
+              {tab === "approvals" && (
+                <span
+                  className={`absolute -top-2.5 -right-2.5 min-w-5 h-5 px-1 rounded-full text-xs font-bold flex items-center justify-center ${
+                    pendingApprovals.length > 0
+                      ? "bg-destructive text-destructive-foreground"
+                      : "bg-slate-700/70 text-slate-300"
+                  }`}
+                >
+                  {pendingApprovals.length}
+                </span>
               )}
               {showBadge && (
                 <span className="absolute -top-2 -right-2 w-5 h-5 rounded-full bg-destructive text-destructive-foreground text-xs font-bold flex items-center justify-center animate-pulse">
                   {totalUnresolved}
                 </span>
               )}
-              {tab.charAt(0).toUpperCase() + tab.slice(1)}
+              {label}
             </Button>
           );
         })}
@@ -1190,7 +1247,6 @@ const handleApproveService = async (id: string) => {
       {activeTab === "approvals" && renderApprovals()}
       {activeTab === "services" && renderActiveServices()}
       {activeTab === "users" && renderUsers()}
-      {activeTab === "providers" && renderProviders()}
       {activeTab === "bookings" && renderBookings()}
       {activeTab === "live" && renderLiveActivity()}
       {activeTab === "support" && renderSupport()}
