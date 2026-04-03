@@ -1,7 +1,5 @@
 const CACHE_NAME = "ssmp-cache-v1";
 const CORE_ASSETS = [
-  "/",
-  "/index.html",
   "/manifest.json",
   "/icon-192.png",
   "/icon-512.png",
@@ -44,6 +42,23 @@ self.addEventListener("fetch", (event) => {
     return;
   }
 
+  if (event.request.mode === "navigate") {
+    event.respondWith(
+      fetch(event.request)
+        .then((response) => {
+          const responseClone = response.clone();
+          caches.open(CACHE_NAME).then((cache) => {
+            cache.put(event.request, responseClone);
+          });
+          return response;
+        })
+        .catch(() => {
+          return caches.match("/") || Response.error();
+        })
+    );
+    return;
+  }
+
   event.respondWith(
     caches.match(event.request).then((cachedResponse) => {
       if (cachedResponse) {
@@ -62,10 +77,7 @@ self.addEventListener("fetch", (event) => {
           return response;
         })
         .catch(() => {
-          if (event.request.mode === "navigate") {
-            return caches.match("/");
-          }
-          return undefined;
+          return Response.error();
         });
     })
   );
