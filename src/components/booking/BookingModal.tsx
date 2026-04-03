@@ -1,14 +1,15 @@
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { motion, AnimatePresence } from "framer-motion";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { X, Calendar, Star, CheckCircle } from "lucide-react";
+import { X, Calendar as CalendarIcon, Star, CheckCircle } from "lucide-react";
 import { useAuth } from "@/hooks/useAuth";
 import { supabase } from "@/integrations/supabase/client";
 import { useToast } from "@/hooks/use-toast";
 import { useNavigate } from "react-router-dom";
 import ServiceLocationPicker from "@/components/booking/ServiceLocationPicker";
+import { Calendar } from "@/components/ui/calendar";
 
 interface BookingModalProps {
   service: any;
@@ -19,6 +20,35 @@ const timeSlots = [
   "09:00 AM", "10:00 AM", "11:00 AM", "12:00 PM",
   "01:00 PM", "02:00 PM", "03:00 PM", "04:00 PM", "05:00 PM",
 ];
+
+const getLocalDateString = () => {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = String(now.getMonth() + 1).padStart(2, "0");
+  const day = String(now.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const formatLocalDate = (dateValue: Date) => {
+  const year = dateValue.getFullYear();
+  const month = String(dateValue.getMonth() + 1).padStart(2, "0");
+  const day = String(dateValue.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+};
+
+const formatDisplayDate = (value: string) => {
+  const parts = value.split("-");
+  if (parts.length !== 3) return value;
+  const [year, month, day] = parts;
+  if (!year || !month || !day) return value;
+  return `${day}-${month}-${year}`;
+};
+
+const parseLocalDate = (value: string) => {
+  const [year, month, day] = value.split("-").map(Number);
+  if (!year || !month || !day) return null;
+  return new Date(year, month - 1, day);
+};
 
 const BookingModal = ({ service, onClose }: BookingModalProps) => {
   const [step, setStep] = useState<"details" | "time" | "confirm" | "success">("details");
@@ -31,14 +61,93 @@ const BookingModal = ({ service, onClose }: BookingModalProps) => {
     address: string;
   } | null>(null);
   const [loading, setLoading] = useState(false);
+  const [blockedDate, setBlockedDate] = useState<Date | null>(null);
+  const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
+  const [nowTick, setNowTick] = useState(0);
   const { user } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    const id = window.setInterval(() => setNowTick((prev) => prev + 1), 60000);
+    return () => window.clearInterval(id);
+  }, []);
+
+  const todayStr = useMemo(() => getLocalDateString(), [nowTick]);
+  const todayDate = useMemo(() => {
+    const now = new Date();
+    now.setHours(0, 0, 0, 0);
+    return now;
+  }, [nowTick]);
+
+  const isSameDay = (a: string, b: string) => a === b;
+
+  const getSlotMinutes = (slot: string) => {
+    const match = slot.match(/^(\d{1,2}):(\d{2})\s*(AM|PM)$/i);
+    if (!match) return null;
+    let hours = Number(match[1]);
+    const minutes = Number(match[2]);
+    const meridiem = match[3].toUpperCase();
+    if (meridiem === "PM" && hours < 12) hours += 12;
+    if (meridiem === "AM" && hours === 12) hours = 0;
+    return hours * 60 + minutes;
+  };
+
+  const availableSlots = useMemo(() => {
+    if (!date) return timeSlots;
+    if (date < todayStr) return [];
+    if (!isSameDay(date, todayStr)) return timeSlots;
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    return timeSlots.filter((slot) => {
+      const slotMinutes = getSlotMinutes(slot);
+      return slotMinutes !== null && slotMinutes >= nowMinutes;
+    });
+  }, [date, todayStr, nowTick]);
+
+  useEffect(() => {
+    if (!date || !time) return;
+    if (date < todayStr) {
+      setTime("");
+      return;
+    }
+    if (!isSameDay(date, todayStr)) return;
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const slotMinutes = getSlotMinutes(time);
+    if (slotMinutes !== null && slotMinutes < nowMinutes) {
+      setTime("");
+    }
+  }, [date, time, todayStr]);
+
+  const isDateValid = useMemo(() => {
+    return Boolean(date) && date >= todayStr;
+  }, [date, todayStr]);
+
+  const isSelectedTimeValid = useMemo(() => {
+    if (!date || !time) return false;
+    if (date < todayStr) return false;
+    if (!isSameDay(date, todayStr)) return true;
+    const now = new Date();
+    const nowMinutes = now.getHours() * 60 + now.getMinutes();
+    const slotMinutes = getSlotMinutes(time);
+    if (slotMinutes === null) return false;
+    return slotMinutes >= nowMinutes;
+  }, [date, time, todayStr, nowTick]);
 
   const handleBook = async () => {
     if (!user) {
       toast({ title: "Please sign in", description: "You need to be logged in to book", variant: "destructive" });
       navigate("/login");
+      return;
+    }
+
+    if (!isDateValid || !time || !isSelectedTimeValid) {
+      toast({
+        title: "Choose a valid time",
+        description: "Please select a time slot in the future.",
+        variant: "destructive",
+      });
       return;
     }
 
@@ -126,56 +235,103 @@ const BookingModal = ({ service, onClose }: BookingModalProps) => {
 
             {step === "time" && (
               <div>
-                <h2 className="text-2xl font-bold font-display text-foreground mb-6">Choose Date & Time</h2>
+                {!isDatePickerOpen && (
+                  <h2 className="text-2xl font-bold font-display text-foreground mb-6">Choose Date & Time</h2>
+                )}
                 <div className="space-y-4">
                   <div>
-                    <Label className="text-foreground">Date</Label>
+                    {!isDatePickerOpen && <Label className="text-foreground">Date</Label>}
                     <div className="relative mt-2">
-                      <Calendar className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
-                      <Input
-                        type="date"
-                        value={date}
-                        onChange={(e) => setDate(e.target.value)}
-                        min={new Date().toISOString().split("T")[0]}
-                        className="pl-10 bg-secondary/50 border-border rounded-xl h-11"
-                      />
+                      <Button
+                        variant="outline"
+                        className="w-full justify-start text-left pl-10 bg-secondary/50 border-border rounded-xl h-11"
+                        onClick={() => setIsDatePickerOpen((prev) => !prev)}
+                      >
+                        <CalendarIcon className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground pointer-events-none" />
+                        {date ? formatDisplayDate(date) : "Select date"}
+                      </Button>
                     </div>
+                    {isDatePickerOpen && (
+                      <div className="mt-3 flex justify-center rounded-xl border border-border bg-background/40 p-2">
+                        <Calendar
+                          mode="single"
+                          selected={date ? parseLocalDate(date) ?? undefined : undefined}
+                          onSelect={(day) => {
+                            if (!day) return;
+                            setDate(formatLocalDate(day));
+                            setIsDatePickerOpen(false);
+                          }}
+                          onDayClick={(day, modifiers) => {
+                            if (modifiers?.disabled || day < todayDate) {
+                              setBlockedDate(day);
+                              toast({
+                                title: "Past date",
+                                description: "You can't book a past date.",
+                                variant: "destructive",
+                              });
+                            }
+                          }}
+                          disabled={{ before: todayDate }}
+                          modifiers={{ blocked: blockedDate ?? undefined }}
+                          modifiersClassNames={{
+                            blocked: "ring-2 ring-destructive text-destructive rounded-full",
+                          }}
+                          initialFocus
+                        />
+                      </div>
+                    )}
                   </div>
 
-                  <div>
-                    <Label className="text-foreground">Time Slot</Label>
-                    <div className="grid grid-cols-3 gap-2 mt-2">
-                      {timeSlots.map((slot) => (
-                        <motion.button
-                          key={slot}
-                          whileTap={{ scale: 0.95 }}
-                          onClick={() => setTime(slot)}
-                          className={`py-2 px-2 rounded-lg text-sm font-medium transition-all ${
-                            time === slot
-                              ? "gradient-primary text-primary-foreground"
-                              : "bg-secondary/50 text-muted-foreground hover:text-foreground"
-                          }`}
-                        >
-                          {slot}
-                        </motion.button>
-                      ))}
-                    </div>
-                  </div>
+                  {!isDatePickerOpen && (
+                    <>
+                      <div>
+                        <Label className="text-foreground">Time Slot</Label>
+                        <div className="grid grid-cols-3 gap-2 mt-2">
+                          {timeSlots.map((slot) => {
+                            const isAvailable = availableSlots.includes(slot);
+                            const isSelected = time === slot;
+                            return (
+                            <motion.button
+                              key={slot}
+                              whileTap={{ scale: 0.95 }}
+                              onClick={() => (isAvailable ? setTime(slot) : undefined)}
+                              disabled={!isAvailable}
+                              className={`py-2 px-2 rounded-lg text-sm font-medium transition-all ${
+                                isSelected
+                                  ? "gradient-primary text-primary-foreground"
+                                  : isAvailable
+                                    ? "bg-secondary/50 text-muted-foreground hover:text-foreground"
+                                    : "bg-secondary/30 text-muted-foreground/50 cursor-not-allowed"
+                              }`}
+                            >
+                              {slot}
+                            </motion.button>
+                          );
+                        })}
+                        </div>
+                        {date && date === todayStr && availableSlots.length === 0 && (
+                          <div className="mt-3 text-sm text-warning">
+                            No time slots left today. Please choose a future date.
+                          </div>
+                        )}
+                      </div>
 
-                  <div>
-                    <Label className="text-foreground">Notes (optional)</Label>
-                    <Input
-                      placeholder="Any special instructions..."
-                      value={notes}
-                      onChange={(e) => setNotes(e.target.value)}
-                      className="bg-secondary/50 border-border mt-2 rounded-xl h-11"
-                    />
-                  </div>
+                      <div>
+                        <Label className="text-foreground">Notes (optional)</Label>
+                        <Input
+                          placeholder="Any special instructions..."
+                          value={notes}
+                          onChange={(e) => setNotes(e.target.value)}
+                          className="bg-secondary/50 border-border mt-2 rounded-xl h-11"
+                        />
+                      </div>
 
-                  <div>
-                    <Label className="text-foreground mb-3 block">Select Service Location</Label>
-                    <ServiceLocationPicker value={serviceLocation} onChange={setServiceLocation} />
-                  </div>
+                      <div>
+                        <Label className="text-foreground mb-3 block">Select Service Location</Label>
+                        <ServiceLocationPicker value={serviceLocation} onChange={setServiceLocation} />
+                      </div>
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -224,6 +380,7 @@ const BookingModal = ({ service, onClose }: BookingModalProps) => {
           </div>
 
           {/* Sticky Footer */}
+          {!(step === "time" && isDatePickerOpen) && (
           <div className="border-t border-border px-8 py-4 bg-background/50 backdrop-blur-sm shrink-0">
             {step === "details" && (
               <Button 
@@ -247,7 +404,7 @@ const BookingModal = ({ service, onClose }: BookingModalProps) => {
                 <Button 
                   variant="hero" 
                   className="flex-1 rounded-xl h-11" 
-                  disabled={!date || !time || !serviceLocation} 
+                  disabled={!isDateValid || !time || !serviceLocation || !isSelectedTimeValid} 
                   onClick={() => setStep("confirm")}
                 >
                   Review Booking
@@ -294,6 +451,7 @@ const BookingModal = ({ service, onClose }: BookingModalProps) => {
               </div>
             )}
           </div>
+          )}
         </motion.div>
       </motion.div>
     </AnimatePresence>
