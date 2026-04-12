@@ -68,8 +68,6 @@ export default function PhoneAuth() {
         name: authMode === "register" ? name : existing?.name ?? undefined,
       });
 
-      console.log("Firebase User:", user);
-
       if (effectiveRole === "admin") {
         navigate("/dashboard/admin");
       } else if (effectiveRole === "provider") {

@@ -268,7 +268,6 @@ export function useVideoCall(bookingId?: string) {
           filter: `booking_id=eq.${bookingId}`,
         },
         (payload: any) => {
-          console.log("📞 Video call update:", payload);
           queryClient.invalidateQueries({ queryKey: ["active-call", bookingId] });
           
           // Update pending call state for incoming calls
@@ -304,7 +303,6 @@ export function useVideoCall(bookingId?: string) {
           filter: `receiver_id=eq.${user.id}`,
         },
         () => {
-          console.log("📞 New incoming call!");
           void refetchIncoming();
         }
       )

@@ -5,7 +5,13 @@ import { Button } from "@/components/ui/button";
 import { Search, ArrowRight, Sparkles, Globe, Mic, MicOff } from "lucide-react";
 import { supabase } from "@/integrations/supabase/client";
 import { serviceCategories } from "@/data/marketplace";
-import { suggestCategory, tokenize } from "@/lib/nlpSearch";
+import {
+  suggestCategory,
+  tokenize,
+  transliterateDevanagari,
+  normalizeLocationQuery,
+  expandLocationAliases,
+} from "@/lib/nlpSearch";
 
 type SearchSuggestion = {
   label: string;
@@ -28,6 +34,8 @@ const splitRawTerms = (input: string): string[] =>
     .map((t) => t.trim())
     .filter((t) => t.length >= 2)
     .slice(0, 8);
+
+const containsDevanagari = (input: string): boolean => /[\u0900-\u097F]/.test(input);
 
 const includesAnyTerm = (text: string, terms: string[]) => {
   const lower = text.toLowerCase();
@@ -99,10 +107,16 @@ const Hero = () => {
     if (availableProviderIds.length === 0) return 0;
 
     const services = await fetchSearchableServices(availableProviderIds, category);
-    const tokens = tokenize(query);
-    const rawTerms = splitRawTerms(query);
-    const terms = Array.from(new Set([...(tokens.length ? tokens : []), ...rawTerms]));
-    const effectiveTerms = terms.length ? terms : [query.trim()];
+    const canonicalQuery = normalizeLocationQuery(query);
+    const transliterated = transliterateDevanagari(query);
+    const tokens = tokenize(canonicalQuery);
+    const translitTokens = tokenize(transliterated);
+    const rawTerms = splitRawTerms(canonicalQuery);
+    const rawTranslitTerms = splitRawTerms(transliterated);
+    const terms = expandLocationAliases(
+      Array.from(new Set([...(tokens.length ? tokens : []), ...rawTerms, ...translitTokens, ...rawTranslitTerms]))
+    );
+    const effectiveTerms = terms.length ? terms : [canonicalQuery.trim() || transliterated.trim() || query.trim()];
 
     return services.filter((s: any) => {
       const title = String(s?.title ?? "");
@@ -124,6 +138,9 @@ const Hero = () => {
         setSuggestionsChecked(false);
         setAvailabilityNote("");
         const translated = await translateQuery(searchQuery);
+        const canonicalTranslated = normalizeLocationQuery(translated);
+        const transliteratedOriginal = transliterateDevanagari(searchQuery);
+        const transliteratedTranslated = transliterateDevanagari(translated);
         const availableProviderIds = await getAvailableProviderIds();
 
         if (availableProviderIds.length === 0) {
@@ -135,13 +152,27 @@ const Hero = () => {
         }
 
         const inferredCategory = suggestCategory(translated, serviceCategories);
-        const searchTokens = tokenize(translated);
-        const rawTerms = splitRawTerms(translated);
+        const searchTokens = tokenize(canonicalTranslated);
+        const translitTokens = tokenize(transliteratedTranslated);
+        const rawTerms = splitRawTerms(canonicalTranslated);
+        const translitRawTerms = splitRawTerms(transliteratedTranslated);
         const originalRawTerms = splitRawTerms(searchQuery);
-        const terms = Array.from(
-          new Set([...(searchTokens.length ? searchTokens : []), ...rawTerms, ...originalRawTerms])
+        const originalTranslitTerms = splitRawTerms(transliteratedOriginal);
+        const terms = expandLocationAliases(
+          Array.from(
+            new Set([
+              ...(searchTokens.length ? searchTokens : []),
+              ...rawTerms,
+              ...translitTokens,
+              ...translitRawTerms,
+              ...originalRawTerms,
+              ...originalTranslitTerms,
+            ])
+          )
         );
-        const effectiveTerms = terms.length ? terms : [translated.trim()];
+        const effectiveTerms = terms.length
+          ? terms
+          : [canonicalTranslated.trim() || transliteratedTranslated.trim() || translated.trim() || searchQuery.trim()];
 
         let data: any[] = [];
         try {
@@ -342,9 +373,13 @@ const Hero = () => {
   const handleSearch = async () => {
     setAvailabilityNote("");
     const translated = (await translateQuery(searchQuery)).trim();
-    if (!translated) return;
+    const transliterated = transliterateDevanagari(searchQuery).trim();
+    const useTranslit = containsDevanagari(searchQuery) && transliterated && translated === searchQuery.trim();
+    const rawQuery = (useTranslit ? transliterated : translated) || transliterated || searchQuery.trim();
+    const finalQuery = normalizeLocationQuery(rawQuery) || rawQuery;
+    if (!finalQuery) return;
     const params = new URLSearchParams();
-    params.set("q", translated);
+    params.set("q", finalQuery);
     navigate(`/services?${params.toString()}`);
   };
 

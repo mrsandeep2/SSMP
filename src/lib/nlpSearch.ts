@@ -91,13 +91,198 @@ const CATEGORY_SYNONYMS: Record<string, string> = {
   "home painting": "Home Services",
 };
 
+const DEVANAGARI_VOWELS: Record<string, string> = {
+  "अ": "a",
+  "आ": "aa",
+  "इ": "i",
+  "ई": "ii",
+  "उ": "u",
+  "ऊ": "uu",
+  "ए": "e",
+  "ऐ": "ai",
+  "ओ": "o",
+  "औ": "au",
+  "ऋ": "ri",
+  "अं": "an",
+  "अः": "ah",
+};
+
+const DEVANAGARI_MATRAS: Record<string, string> = {
+  "ा": "aa",
+  "ि": "i",
+  "ी": "ii",
+  "ु": "u",
+  "ू": "uu",
+  "े": "e",
+  "ै": "ai",
+  "ो": "o",
+  "ौ": "au",
+  "ृ": "ri",
+  "ं": "n",
+  "ः": "h",
+};
+
+const DEVANAGARI_CONSONANTS: Record<string, string> = {
+  "क": "k",
+  "ख": "kh",
+  "ग": "g",
+  "घ": "gh",
+  "ङ": "n",
+  "च": "ch",
+  "छ": "chh",
+  "ज": "j",
+  "झ": "jh",
+  "ञ": "n",
+  "ट": "t",
+  "ठ": "th",
+  "ड": "d",
+  "ढ": "dh",
+  "ण": "n",
+  "त": "t",
+  "थ": "th",
+  "द": "d",
+  "ध": "dh",
+  "न": "n",
+  "प": "p",
+  "फ": "ph",
+  "ब": "b",
+  "भ": "bh",
+  "म": "m",
+  "य": "y",
+  "र": "r",
+  "ल": "l",
+  "व": "v",
+  "श": "sh",
+  "ष": "sh",
+  "स": "s",
+  "ह": "h",
+  "ळ": "l",
+  "क्ष": "ksh",
+  "ज्ञ": "gy",
+};
+
+const DEVANAGARI_VIRAMA = "्";
+
+const LOCATION_ALIASES: Record<string, string[]> = {
+  moradabad: ["muradabad", "muradabaad"],
+  delhi: ["dilli", "delhii", "dilhi"],
+  bengaluru: ["bangalore", "bengalore"],
+  mumbai: ["bombay"],
+  chennai: ["madras"],
+  kolkata: ["calcutta"],
+  gurugram: ["gurgaon"],
+  prayagraj: ["allahabad"],
+};
+
+const buildAliasMap = (): Record<string, string> => {
+  const out: Record<string, string> = {};
+  Object.entries(LOCATION_ALIASES).forEach(([canonical, aliases]) => {
+    out[canonical] = canonical;
+    aliases.forEach((alias) => {
+      out[alias] = canonical;
+    });
+  });
+  return out;
+};
+
+const LOCATION_ALIAS_MAP = buildAliasMap();
+
+const collapseVowels = (value: string): string => value.replace(/([aeiou])\1+/g, "$1");
+
+const canonicalizeLocationToken = (token: string): string => {
+  if (!token) return token;
+  let next = collapseVowels(token.toLowerCase());
+  if (next.length > 4) {
+    next = next.replace(/a$/g, "");
+  }
+  return next;
+};
+
+export function transliterateDevanagari(input: string): string {
+  if (!input) return "";
+  let out = "";
+  const chars = Array.from(input);
+  for (let i = 0; i < chars.length; i += 1) {
+    const ch = chars[i];
+    const next = chars[i + 1];
+
+    if (DEVANAGARI_VOWELS[ch]) {
+      out += DEVANAGARI_VOWELS[ch];
+      continue;
+    }
+
+    // Handle consonant + matra/virama combinations.
+    const cons = DEVANAGARI_CONSONANTS[ch];
+    if (cons) {
+      if (next === DEVANAGARI_VIRAMA) {
+        out += cons;
+        i += 1;
+        continue;
+      }
+      if (next && DEVANAGARI_MATRAS[next]) {
+        out += cons + DEVANAGARI_MATRAS[next];
+        i += 1;
+        continue;
+      }
+      out += cons + "a";
+      continue;
+    }
+
+    if (DEVANAGARI_MATRAS[ch]) {
+      out += DEVANAGARI_MATRAS[ch];
+      continue;
+    }
+
+    out += ch;
+  }
+  return out;
+}
+
 export function normalizeText(input: string): string {
-  return (input || "")
+  const source = transliterateDevanagari(input || "");
+  return source
     .toLowerCase()
     .replace(/[_/\\|]+/g, " ")
     .replace(/[^a-z0-9\s]+/g, " ")
     .replace(/\s+/g, " ")
     .trim();
+}
+
+export function normalizeLocationQuery(input: string): string {
+  const norm = normalizeText(input || "");
+  if (!norm) return "";
+  const tokens = norm.split(" ").filter(Boolean);
+  const normalized = tokens.map((t) => {
+    const canonicalToken = canonicalizeLocationToken(t);
+    return LOCATION_ALIAS_MAP[canonicalToken] || canonicalToken;
+  });
+  return normalized.join(" ").trim();
+}
+
+export function extractLocationTokens(input: string): string[] {
+  const norm = normalizeText(input || "");
+  if (!norm) return [];
+  const tokens = norm.split(" ").filter(Boolean);
+  const out = new Set<string>();
+  tokens.forEach((t) => {
+    const canonicalToken = canonicalizeLocationToken(t);
+    const mapped = LOCATION_ALIAS_MAP[canonicalToken];
+    if (mapped) out.add(mapped);
+  });
+  return Array.from(out);
+}
+
+export function expandLocationAliases(tokens: string[]): string[] {
+  const out = new Set<string>();
+  tokens.forEach((raw) => {
+    const token = canonicalizeLocationToken(raw);
+    out.add(token);
+    const canonical = LOCATION_ALIAS_MAP[token];
+    if (canonical) out.add(canonical);
+    const aliases = LOCATION_ALIASES[token];
+    if (aliases) aliases.forEach((alias) => out.add(alias));
+  });
+  return Array.from(out);
 }
 
 export function tokenize(input: string): string[] {

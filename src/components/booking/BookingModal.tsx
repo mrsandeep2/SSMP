@@ -64,7 +64,7 @@ const BookingModal = ({ service, onClose }: BookingModalProps) => {
   const [blockedDate, setBlockedDate] = useState<Date | null>(null);
   const [isDatePickerOpen, setIsDatePickerOpen] = useState(false);
   const [nowTick, setNowTick] = useState(0);
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { toast } = useToast();
   const navigate = useNavigate();
 
@@ -136,6 +136,14 @@ const BookingModal = ({ service, onClose }: BookingModalProps) => {
   }, [date, time, todayStr, nowTick]);
 
   const handleBook = async () => {
+    if (role === "provider") {
+      toast({
+        title: "Providers cannot book services",
+        description: "Provider accounts can only offer services, not book them.",
+        variant: "destructive",
+      });
+      return;
+    }
     if (!user) {
       toast({ title: "Please sign in", description: "You need to be logged in to book", variant: "destructive" });
       navigate("/login");
@@ -150,14 +158,6 @@ const BookingModal = ({ service, onClose }: BookingModalProps) => {
       });
       return;
     }
-
-    console.log("🎯 Creating booking with:", {
-      seeker_id: user.id,
-      seeker_email: user.email,
-      provider_id: service.provider_id,
-      service_id: service.id,
-      amount: service.price,
-    });
 
     setLoading(true);
     const { error } = await supabase.from("bookings").insert({
@@ -176,10 +176,8 @@ const BookingModal = ({ service, onClose }: BookingModalProps) => {
     setLoading(false);
 
     if (error) {
-      console.error("❌ Booking creation failed:", error);
       toast({ title: "Booking failed", description: error.message, variant: "destructive" });
     } else {
-      console.log("✅ Booking created successfully!");
       setStep("success");
     }
   };

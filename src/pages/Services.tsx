@@ -15,7 +15,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { MapPin, Search, SlidersHorizontal, Star, IndianRupee, Mic, MicOff } from "lucide-react";
+import { MapPin, Search, SlidersHorizontal, Star, IndianRupee, Mic, MicOff, X } from "lucide-react";
 import { serviceCategories } from "@/data/marketplace";
 import { supabase } from "@/integrations/supabase/client";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
@@ -24,9 +24,10 @@ import BookingModal from "@/components/booking/BookingModal";
 import {
   buildPostgrestOrForTokens,
   scoreServiceMatch,
-  suggestCategory,
-  tokenize,
+  normalizeLocationQuery,
+  transliterateDevanagari,
 } from "@/lib/nlpSearch";
+import { normalizeServiceSearch } from "@/lib/searchNormalizer";
 import Seo from "@/components/seo/Seo";
 
 const categoryEmoji: Record<string, string> = {
@@ -41,7 +42,7 @@ const categoryEmoji: Record<string, string> = {
 const Services = () => {
   const location = useLocation();
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, role } = useAuth();
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -52,6 +53,7 @@ const Services = () => {
   const [maxPrice, setMaxPrice] = useState(50000);
   const [minRating, setMinRating] = useState(0);
   const [bookingService, setBookingService] = useState<any>(null);
+  const [detailService, setDetailService] = useState<any>(null);
 
   // Voice search states
   const [isListening, setIsListening] = useState(false);
@@ -80,7 +82,6 @@ const Services = () => {
   // Voice search setup
   useEffect(() => {
     if (!("webkitSpeechRecognition" in window) && !("SpeechRecognition" in window)) {
-      console.log("Speech recognition not supported");
       return;
     }
 
@@ -97,8 +98,7 @@ const Services = () => {
       setSearchQuery(transcript);
     };
 
-    recognition.onerror = (event: any) => {
-      console.error("Speech recognition error", event.error);
+    recognition.onerror = () => {
       setIsListening(false);
       listeningRef.current = false;
     };
@@ -132,9 +132,10 @@ const Services = () => {
   // Search function
   const handleSearch = () => {
     if (!searchQuery.trim()) return;
-    
+
+    const normalized = normalizeServiceSearch(searchQuery, serviceCategories);
     const params = new URLSearchParams();
-    params.set("q", searchQuery.trim());
+    params.set("q", normalized.normalized_query || searchQuery.trim());
     navigate(`/services?${params.toString()}`);
   };
 
@@ -160,17 +161,10 @@ const Services = () => {
 
       // Apply NLP search if there's an active search
       if (activeSearch) {
-        const inferredCategory = suggestCategory(activeSearch, serviceCategories);
-        const nlpTokens = tokenize(activeSearch);
-        const rawTokens = activeSearch
-          .trim()
-          .split(/\s+/)
-          .map((t) => t.trim().toLowerCase())
-          .filter((t) => t.length >= 2)
-          .slice(0, 8);
-        const extraTokens = inferredCategory ? tokenize(inferredCategory) : [];
-        const tokens = Array.from(new Set([...nlpTokens, ...rawTokens, ...extraTokens]));
-        const orClauses = buildPostgrestOrForTokens(tokens.length ? tokens : [activeSearch]);
+        const normalized = normalizeServiceSearch(activeSearch, serviceCategories);
+        const orClauses = buildPostgrestOrForTokens(
+          normalized.tokens.length ? normalized.tokens : [normalized.normalized_query]
+        );
         if (orClauses) {
           query = query.or(orClauses);
         }
@@ -181,7 +175,16 @@ const Services = () => {
         query = query.eq("category", selectedCategory);
       }
       if (locationFilter) {
-        query = query.ilike("location", `%${locationFilter}%`);
+        const rawLocation = locationFilter.trim();
+        const transliteratedLocation = transliterateDevanagari(rawLocation).trim();
+        const canonicalLocation = normalizeLocationQuery(rawLocation).trim();
+        if (canonicalLocation && canonicalLocation.toLowerCase() !== rawLocation.toLowerCase()) {
+          query = query.or(`location.ilike.%${rawLocation}%,location.ilike.%${canonicalLocation}%`);
+        } else if (transliteratedLocation && transliteratedLocation.toLowerCase() !== rawLocation.toLowerCase()) {
+          query = query.or(`location.ilike.%${rawLocation}%,location.ilike.%${transliteratedLocation}%`);
+        } else {
+          query = query.ilike("location", `%${rawLocation}%`);
+        }
       }
       if (maxPrice < 50000) {
         query = query.lte("price", maxPrice);
@@ -196,20 +199,10 @@ const Services = () => {
       
       // Score and sort results if there's a search
       if (activeSearch && data) {
-        const scoreTokens = Array.from(
-          new Set([
-            ...tokenize(activeSearch),
-            ...activeSearch
-              .trim()
-              .split(/\s+/)
-              .map((t) => t.trim().toLowerCase())
-              .filter((t) => t.length >= 2)
-              .slice(0, 8),
-          ])
-        );
+        const normalized = normalizeServiceSearch(activeSearch, serviceCategories);
         const scored = data.map(service => ({
           ...service,
-          score: scoreServiceMatch(service, activeSearch, scoreTokens)
+          score: scoreServiceMatch(service, normalized.normalized_query, normalized.tokens)
         }));
         
         // Filter out services with very low scores, but keep some results
@@ -486,32 +479,34 @@ const Services = () => {
                   {/* Price */}
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium text-foreground">Price</label>
-                    <select
-                      value={maxPrice}
-                      onChange={(e) => setMaxPrice(Number(e.target.value))}
-                      className="text-xs bg-secondary/30 border border-border rounded px-2 py-1 h-8"
-                    >
-                      <option value={50000}>Any Price</option>
-                      <option value={500}>Under ₹500</option>
-                      <option value={1000}>Under ₹1k</option>
-                      <option value={2000}>Under ₹2k</option>
-                      <option value={5000}>Under ₹5k</option>
-                    </select>
+                    <Select value={String(maxPrice)} onValueChange={(v) => setMaxPrice(Number(v))}>
+                      <SelectTrigger className="h-8 text-xs bg-secondary/30 border border-border">
+                        <SelectValue placeholder="Any Price" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="50000">Any Price</SelectItem>
+                        <SelectItem value="500">Under ₹500</SelectItem>
+                        <SelectItem value="1000">Under ₹1k</SelectItem>
+                        <SelectItem value="2000">Under ₹2k</SelectItem>
+                        <SelectItem value="5000">Under ₹5k</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Quality */}
                   <div className="flex flex-col gap-1">
                     <label className="text-xs font-medium text-foreground">Quality</label>
-                    <select
-                      value={minRating}
-                      onChange={(e) => setMinRating(Number(e.target.value))}
-                      className="text-xs bg-secondary/30 border border-border rounded px-2 py-1 h-8"
-                    >
-                      <option value={0}>Any</option>
-                      <option value={3}>Good ⭐⭐⭐</option>
-                      <option value={4}>Better ⭐⭐⭐⭐</option>
-                      <option value={5}>Best ⭐⭐⭐⭐⭐</option>
-                    </select>
+                    <Select value={String(minRating)} onValueChange={(v) => setMinRating(Number(v))}>
+                      <SelectTrigger className="h-8 text-xs bg-secondary/30 border border-border">
+                        <SelectValue placeholder="Any" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="0">Any</SelectItem>
+                        <SelectItem value="3">Good ⭐⭐⭐</SelectItem>
+                        <SelectItem value="4">Better ⭐⭐⭐⭐</SelectItem>
+                        <SelectItem value="5">Best ⭐⭐⭐⭐⭐</SelectItem>
+                      </SelectContent>
+                    </Select>
                   </div>
 
                   {/* Location */}
@@ -546,19 +541,6 @@ const Services = () => {
                       : "Try searching for a service type like 'plumber', 'electrician', or 'AC repair'"
                     }
                   </p>
-                  {/* Debug information */}
-                  {process.env.NODE_ENV === 'development' && (
-                    <div className="text-xs text-muted-foreground mt-2 p-2 bg-secondary/20 rounded">
-                      <p>Debug Info:</p>
-                      <p>Services: {services?.length || 0}</p>
-                      <p>Active Search: {activeSearch}</p>
-                      <p>Is Service Type Searched: {isServiceTypeSearched}</p>
-                      <p>Selected Category: {selectedCategory}</p>
-                      <p>Location: {locationFilter}</p>
-                      <p>Max Price: {maxPrice}</p>
-                      <p>Min Rating: {minRating}</p>
-                    </div>
-                  )}
                   {isServiceTypeSearched ? (
                     <div className="flex flex-col items-center gap-2">
                       <Button
@@ -666,8 +648,18 @@ const Services = () => {
                             <span className="text-xs text-muted-foreground">
                               {service.category} • {service.location || "Remote"}
                             </span>
-                            <Button variant="hero" size="sm" onClick={() => setBookingService(service)}>
-                              Book Now
+                            <Button
+                              variant="hero"
+                              size="sm"
+                              onClick={() => {
+                                if (role === "provider") {
+                                  setDetailService(service);
+                                  return;
+                                }
+                                setBookingService(service);
+                              }}
+                            >
+                              {role === "provider" ? "View Details" : "Book Now"}
                             </Button>
                           </div>
                         </div>
@@ -679,8 +671,58 @@ const Services = () => {
             </motion.div>
       </div>
 
-      {bookingService && (
+      {bookingService && role !== "provider" && (
         <BookingModal service={bookingService} onClose={() => setBookingService(null)} />
+      )}
+
+      {detailService && role === "provider" && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm p-4" onClick={() => setDetailService(null)}>
+          <div className="glass rounded-2xl w-full max-w-lg p-6 relative" onClick={(e) => e.stopPropagation()}>
+            <button
+              onClick={() => setDetailService(null)}
+              className="absolute top-4 right-4 text-muted-foreground hover:text-foreground transition-colors"
+              aria-label="Close details"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            <h2 className="text-2xl font-bold font-display text-foreground mb-2">Service Details</h2>
+            <p className="text-sm text-muted-foreground mb-4">Provider view only. Booking is disabled for provider accounts.</p>
+            <div className="space-y-3">
+              <div>
+                <div className="text-sm font-semibold text-foreground">Title</div>
+                <div className="text-sm text-muted-foreground">{detailService.title || "Service"}</div>
+              </div>
+              {detailService.description && (
+                <div>
+                  <div className="text-sm font-semibold text-foreground">Description</div>
+                  <div className="text-sm text-muted-foreground">{detailService.description}</div>
+                </div>
+              )}
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <div className="text-sm font-semibold text-foreground">Category</div>
+                  <div className="text-sm text-muted-foreground">{detailService.category || "-"}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-foreground">Price</div>
+                  <div className="text-sm text-muted-foreground">₹{detailService.price ?? "-"}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-foreground">Location</div>
+                  <div className="text-sm text-muted-foreground">{detailService.location || "Remote"}</div>
+                </div>
+                <div>
+                  <div className="text-sm font-semibold text-foreground">Rating</div>
+                  <div className="text-sm text-muted-foreground">
+                    {Number(detailService.review_count || 0) > 0
+                      ? `${Number(detailService.rating || 0).toFixed(1)}★ (${Number(detailService.review_count || 0)})`
+                      : "New"}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
       )}
     </div>
   );

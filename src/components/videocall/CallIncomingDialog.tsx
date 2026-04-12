@@ -51,9 +51,7 @@ const CallIncomingDialog = ({
         "data:audio/wav;base64,UklGRiYAAABXQVZFZm10IBAAAAABAAEAQB8AAAB9AAACABAAZGF0YQIAAAAAAA=="
       );
       audio.loop = true;
-      audio.play().catch(() => {
-        console.log("Ring audio autoplay blocked");
-      });
+      audio.play().catch(() => {});
       setRingAudio(audio);
     }
 

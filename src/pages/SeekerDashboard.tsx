@@ -232,10 +232,8 @@ const SeekerDashboard = () => {
     queryKey: ["my-bookings", user?.id],
     queryFn: async () => {
       if (!user) {
-        console.log("❌ No user, skipping bookings query");
         return [];
       }
-      console.log("🔍 Fetching bookings for seeker:", user.id);
 
       // Fetch bookings without attempting to auto-join profiles (rest returns 400 if no FK exists)
       const { data, error } = await supabase
@@ -245,12 +243,10 @@ const SeekerDashboard = () => {
         .order("created_at", { ascending: false });
 
       if (error) {
-        console.error("❌ Bookings query error:", error);
         throw error;
       }
 
       const rows = data ?? [];
-      console.log("✅ Bookings fetched:", rows.length, "bookings", rows);
 
       // Enrich each booking with provider profile (profiles table is keyed by id)
       const enriched = await Promise.all(rows.map(async (b: any) => {
@@ -346,7 +342,6 @@ const SeekerDashboard = () => {
   // Log any errors
   useEffect(() => {
     if (bookingsError) {
-      console.error("📍 Bookings error in component:", bookingsError);
       toast({ 
         title: "Error loading orders", 
         description: bookingsError.message, 
@@ -357,7 +352,6 @@ const SeekerDashboard = () => {
 
   useEffect(() => {
     if (!loading && user) {
-      console.log("👤 User loaded:", user.id);
       // Force initial fetch of bookings
       queryClient.invalidateQueries({ queryKey: ["my-bookings", user.id] });
     }
@@ -376,7 +370,6 @@ const SeekerDashboard = () => {
           filter: `seeker_id=eq.${user.id}`
         },
         (payload: any) => {
-          console.log("📲 Booking updated for seeker:", payload);
           if (payload.eventType === "UPDATE") {
             const bookingId = payload.new?.id as string | undefined;
             const previousStatusFromPayload = normalizeStatus(payload.old?.status || "");
@@ -432,9 +425,7 @@ const SeekerDashboard = () => {
           queryClient.invalidateQueries({ queryKey: ["my-bookings", user.id] });
         }
       )
-      .subscribe((status) => {
-        console.log("📡 Bookings subscription status:", status);
-      });
+      .subscribe();
     return () => {
       supabase.removeChannel(channel);
     };
@@ -688,17 +679,6 @@ const SeekerDashboard = () => {
   const completed = bookings.filter((b: any) => b.status === "completed").length;
   const totalSpent = bookings.filter((b: any) => b.status === "completed").reduce((s: number, b: any) => s + Number(b.amount), 0);
 
-  // Debug logging
-  console.log("📊 Seeker Dashboard State:", {
-    userId: user?.id,
-    totalBookings: bookings.length,
-    activeCount: active,
-    completedCount: completed,
-    bookingsData: bookings,
-    isLoading: bookingsLoading,
-    error: bookingsError,
-  });
-
   return (
     <div className="min-h-screen bg-background seeker-dashboard-root">
       <Navbar />
@@ -794,7 +774,6 @@ const SeekerDashboard = () => {
                 variant="outline" 
                 size="sm" 
                 onClick={() => {
-                  console.log("🔄 Manual refresh triggered");
                   queryClient.invalidateQueries({ queryKey: ["my-bookings", user?.id] });
                 }}
               >

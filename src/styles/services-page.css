@@ -52,6 +52,17 @@
   background-color: var(--card) !important;
 }
 
+.services-page-root .services-filter-bar select {
+  color: var(--foreground);
+  background-color: var(--card) !important;
+  border-color: var(--glass-border);
+}
+
+.services-page-root .services-filter-bar select option {
+  background-color: var(--card);
+  color: var(--foreground);
+}
+
 /* Service cards: stronger glass + hover animation */
 .services-page-root .service-card {
   position: relative;

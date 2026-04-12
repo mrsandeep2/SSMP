@@ -43,11 +43,9 @@ const VideoCallModal = ({
     script.src = "https://meet.jit.si/external_api.js";
     script.async = true;
     script.onload = () => {
-      console.log("✅ Jitsi API loaded");
       setApiReady(true);
     };
     script.onerror = () => {
-      console.error("❌ Failed to load Jitsi API");
       toast({
         title: "Error",
         description: "Failed to load video call service",
@@ -155,24 +153,20 @@ const VideoCallModal = ({
 
         // Handle ready event
         jitsiRef.current.addEventListener("readyToClose", () => {
-          console.log("📞 Call ended by Jitsi");
           handleCallEnd();
         });
 
         // Keep a lightweight participant count to show waiting state.
         jitsiRef.current.addEventListener("participantJoined", () => {
-          console.log("👤 Participant joined");
           setRemoteParticipantCount((prev) => prev + 1);
         });
 
         jitsiRef.current.addEventListener("participantLeft", () => {
-          console.log("👤 Participant left");
           setRemoteParticipantCount((prev) => Math.max(0, prev - 1));
         });
 
         setIsLoading(false);
       } catch (error) {
-        console.error("❌ Failed to initialize Jitsi:", error);
         toast({
           title: "Error",
           description: "Failed to initialize video call",
@@ -190,8 +184,8 @@ const VideoCallModal = ({
       if (jitsiRef.current) {
         try {
           jitsiRef.current.dispose();
-        } catch (error) {
-          console.error("Error disposing Jitsi:", error);
+        } catch {
+          // Ignore dispose errors.
         }
         jitsiRef.current = null;
       }
@@ -234,7 +228,6 @@ const VideoCallModal = ({
     const durationSeconds = Math.floor(
       (Date.now() - callStartTimeRef.current) / 1000
     );
-    console.log(`📞 Call ended. Duration: ${durationSeconds}s`);
     onCallEnd(durationSeconds);
     onClose();
   };

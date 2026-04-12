@@ -165,7 +165,7 @@ const ProviderDashboard = () => {
           updated_at: new Date().toISOString(),
         });
       },
-      (err) => console.warn("GPS error:", err.message),
+      () => {},
       { enableHighAccuracy: true, maximumAge: 5000, timeout: 15000 }
     );
   };
@@ -182,15 +182,13 @@ const ProviderDashboard = () => {
     if (!user) return;
     
     const ch1 = supabase.channel(`provider-services-rt-${user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "services", filter: `provider_id=eq.${user.id}` }, (payload) => {
-        console.log("📲 Service updated:", payload);
+      .on("postgres_changes", { event: "*", schema: "public", table: "services", filter: `provider_id=eq.${user.id}` }, () => {
         queryClient.invalidateQueries({ queryKey: ["provider-services", user.id] });
       })
-      .subscribe((status) => console.log("Services channel:", status));
+      .subscribe();
     
     const ch2 = supabase.channel(`provider-bookings-rt-${user.id}`)
       .on("postgres_changes", { event: "*", schema: "public", table: "bookings", filter: `provider_id=eq.${user.id}` }, (payload: any) => {
-        console.log("📲 Booking for provider updated:", payload);
         if (payload.eventType === "INSERT") {
           const bookingId = payload.new?.id as string | undefined;
           if (bookingId && !alertedBookingIdsRef.current.has(bookingId)) {
@@ -229,18 +227,17 @@ const ProviderDashboard = () => {
         }
         queryClient.invalidateQueries({ queryKey: ["provider-bookings", user.id] });
       })
-      .subscribe((status) => console.log("Bookings channel:", status));
+      .subscribe();
     
     const ch3 = supabase.channel(`provider-reviews-rt-${user.id}`)
-      .on("postgres_changes", { event: "*", schema: "public", table: "reviews", filter: `provider_id=eq.${user.id}` }, (payload) => {
-        console.log("📲 Review updated:", payload);
+      .on("postgres_changes", { event: "*", schema: "public", table: "reviews", filter: `provider_id=eq.${user.id}` }, () => {
         queryClient.invalidateQueries({
           predicate: (q) =>
             Array.isArray(q.queryKey) &&
             (q.queryKey[0] === "provider-services" || q.queryKey[0] === "provider-bookings" || q.queryKey[0] === "services"),
         });
       })
-      .subscribe((status) => console.log("Reviews channel:", status));
+      .subscribe();
     
     return () => {
       supabase.removeChannel(ch1);
@@ -464,8 +461,6 @@ const ProviderDashboard = () => {
         .eq("provider_id", user?.id as string);
       if (error) throw error;
 
-      console.log(`✅ Booking ${id} updated to ${status}`);
-
       // GPS tracking lifecycle
       if (["arrived", "started", "completed", "cancelled"].includes(status)) {
         stopLocationBroadcast();
@@ -548,8 +543,6 @@ const ProviderDashboard = () => {
 
       const { error } = await supabase.from("bookings").update(payload).eq("id", id);
       if (error) throw error;
-
-      console.log(`✅ Booking ${id} updated`, payload);
 
       await queryClient.invalidateQueries({ queryKey: ["provider-bookings", user?.id] });
       queryClient.invalidateQueries({ predicate: (query) => Array.isArray(query.queryKey) && query.queryKey[0] === "my-bookings" });

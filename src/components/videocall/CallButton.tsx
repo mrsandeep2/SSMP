@@ -52,7 +52,6 @@ const CallButton = ({
         description: `Calling ${receiverName}...`,
       });
     } catch (error: any) {
-      console.error("Error initiating call:", error);
       toast({
         title: "Failed to initiate call",
         description: error?.message || "Could not create call.",
@@ -62,7 +61,6 @@ const CallButton = ({
   };
 
   const handleCallEnd = async (durationSeconds: number) => {
-    console.log(`📞 Call ended. Duration: ${durationSeconds}s`);
     if (activeCall?.id) {
       endCall({ callId: activeCall.id, duration: durationSeconds });
     }
