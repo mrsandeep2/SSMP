@@ -25,4 +25,34 @@
 .seeker-dashboard-root .recent-order { transition: transform 200ms ease, box-shadow 200ms ease; }
 .seeker-dashboard-root .recent-order:hover { transform: translateY(-6px); box-shadow: 0 12px 32px -10px rgba(16,24,40,0.06); }
 
+@media (max-width: 640px) {
+  .seeker-dashboard-root .recent-order-status-scroll {
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: thin;
+    scroll-snap-type: x proximity;
+  }
+
+  .seeker-dashboard-root .recent-order-status-scroll > * {
+    flex: 0 0 auto;
+    scroll-snap-align: start;
+  }
+
+  .seeker-dashboard-root .recent-order-actions {
+    flex-direction: row;
+    flex-wrap: nowrap;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+    gap: 10px;
+    scrollbar-width: thin;
+  }
+
+  .seeker-dashboard-root .recent-order-actions > * {
+    flex: 0 0 auto;
+  }
+
+  .seeker-dashboard-root .recent-order-meta {
+    flex-wrap: nowrap;
+  }
+}
+
 

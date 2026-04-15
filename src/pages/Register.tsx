@@ -1,5 +1,5 @@
-import { useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useEffect, useState } from "react";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { motion } from "framer-motion";
 import { ArrowRight, Eye, EyeOff, Lock, Mail, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,10 @@ import { supabase } from "@/integrations/supabase/client";
 type RoleType = "seeker" | "provider";
 
 const Register = () => {
-  const [role, setRole] = useState<RoleType>("seeker");
+  const [searchParams] = useSearchParams();
+  const roleParam = searchParams.get("role");
+  const initialRole: RoleType = roleParam === "provider" ? "provider" : "seeker";
+  const [role, setRole] = useState<RoleType>(initialRole);
 
   const [name, setName] = useState("");
 
@@ -25,6 +28,12 @@ const Register = () => {
 
   const { toast } = useToast();
   const navigate = useNavigate();
+
+  useEffect(() => {
+    if (roleParam === "provider" || roleParam === "seeker") {
+      setRole(roleParam);
+    }
+  }, [roleParam]);
 
   const handleEmailSignUp = async (e: React.FormEvent) => {
     e.preventDefault();
