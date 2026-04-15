@@ -42,6 +42,10 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
   useEffect(() => {
     let active = true;
+    const loadingTimeout = window.setTimeout(() => {
+      if (!active) return;
+      setLoading(false);
+    }, 4000);
 
     const hydrateSession = async (nextSession: Session | null) => {
       if (!active) return;
@@ -77,6 +81,7 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
 
     return () => {
       active = false;
+      window.clearTimeout(loadingTimeout);
       subscription.unsubscribe();
     };
   }, []);
