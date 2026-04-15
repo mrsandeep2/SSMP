@@ -341,9 +341,19 @@ export default function AdminDashboard() {
     (id) => !adminUserIds.has(id)
   ).length;
 
-  const serviceCallByServiceId = new Map(
-    (serviceCalls as any[]).map((call: any) => [call.service_id, call])
-  );
+  const serviceCallByServiceId = new Map<string, any>();
+  (serviceCalls as any[])
+    .filter((call: any) => ["created", "active"].includes(call.status))
+    .forEach((call: any) => {
+      const existing = serviceCallByServiceId.get(call.service_id);
+      const currentTs = Date.parse(call.updated_at || call.created_at || "") || 0;
+      const existingTs = existing
+        ? (Date.parse(existing.updated_at || existing.created_at || "") || 0)
+        : 0;
+      if (!existing || currentTs >= existingTs) {
+        serviceCallByServiceId.set(call.service_id, call);
+      }
+    });
 
   const providers = users.filter(
     (u: any) => providerUserIds.has(u.id) && !adminUserIds.has(u.id)
@@ -520,7 +530,41 @@ export default function AdminDashboard() {
   const handleCreateServiceRoom = async (serviceId: string) => {
     if (!user) return;
     const roomName = `service_${serviceId}`;
-    const { data, error } = await supabase
+    const { data: existing, error: existingError } = await supabase
+      .from("service_calls")
+      .select("*")
+      .eq("service_id", serviceId)
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+
+    if (existingError) {
+      toast({ title: "Failed to create room", description: existingError.message, variant: "destructive" });
+      return;
+    }
+
+    if (existing) {
+      if (["created", "active"].includes(existing.status)) {
+        toast({ title: "Room already active", description: "Join Room is available for this service." });
+        return;
+      }
+
+      const { error: updateError } = await supabase
+        .from("service_calls")
+        .update({ status: "created" })
+        .eq("id", existing.id);
+
+      if (updateError) {
+        toast({ title: "Failed to reuse room", description: updateError.message, variant: "destructive" });
+        return;
+      }
+
+      queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
+      toast({ title: "Room recreated", description: "Join Room is now available for this service." });
+      return;
+    }
+
+    const { error } = await supabase
       .from("service_calls")
       .insert({
         service_id: serviceId,
@@ -971,13 +1015,30 @@ const handleApproveService = async (id: string) => {
                     {updatingBookingId === b.id ? "Updating..." : "Update Status"}
                   </Button>
                   {serviceCallByServiceId.has(b.service_id) ? (
-                    <Button
-                      size="sm"
-                      variant="hero"
-                      onClick={() => handleJoinServiceRoom(serviceCallByServiceId.get(b.service_id))}
-                    >
-                      Join Room
-                    </Button>
+                    <>
+                      <Button
+                        size="sm"
+                        variant="hero"
+                        onClick={() => handleJoinServiceRoom(serviceCallByServiceId.get(b.service_id))}
+                      >
+                        Join Room
+                      </Button>
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={async () => {
+                          const call = serviceCallByServiceId.get(b.service_id);
+                          if (!call) return;
+                          await supabase
+                            .from("service_calls")
+                            .update({ status: "ended" })
+                            .eq("id", call.id);
+                          queryClient.invalidateQueries({ queryKey: ["admin-service-calls"] });
+                        }}
+                      >
+                        End Room
+                      </Button>
+                    </>
                   ) : (
                     <Button
                       size="sm"

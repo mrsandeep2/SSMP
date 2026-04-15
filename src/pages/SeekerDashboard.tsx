@@ -304,9 +304,19 @@ const SeekerDashboard = () => {
     };
   }, [serviceIds.length, queryClient]);
 
-  const serviceCallByServiceId = new Map(
-    (serviceCalls as any[]).map((call: any) => [call.service_id, call])
-  );
+  const serviceCallByServiceId = new Map<string, any>();
+  (serviceCalls as any[])
+    .filter((call: any) => ["created", "active"].includes(call.status))
+    .forEach((call: any) => {
+      const existing = serviceCallByServiceId.get(call.service_id);
+      const currentTs = Date.parse(call.updated_at || call.created_at || "") || 0;
+      const existingTs = existing
+        ? (Date.parse(existing.updated_at || existing.created_at || "") || 0)
+        : 0;
+      if (!existing || currentTs >= existingTs) {
+        serviceCallByServiceId.set(call.service_id, call);
+      }
+    });
 
   // Reviews: track which bookings the seeker has already reviewed
   const { data: myReviews = [] } = useQuery({
