@@ -285,7 +285,7 @@ export default function AdminDashboard() {
     queryFn: async () => {
       const { data } = await supabase
         .from("support_tickets" as any)
-        .select("id,ticket_code,created_by_role,type,subject,status,priority,booking_id,service_id,created_at")
+        .select("id,ticket_code,created_by_role,type,subject,description,status,priority,booking_id,service_id,created_at")
         .order("created_at", { ascending: false })
         .limit(300);
       return data ?? [];
