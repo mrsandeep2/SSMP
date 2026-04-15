@@ -27,7 +27,9 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
       .select("role")
       .eq("user_id", userId)
       .maybeSingle();
-    setRole(data?.role ?? null);
+    const nextRole = data?.role ?? null;
+    setRole(nextRole);
+    return nextRole;
   };
 
   const handleStaleRefreshToken = async () => {
@@ -39,39 +41,44 @@ export const AuthProvider = ({ children }: { children: ReactNode }) => {
   };
 
   useEffect(() => {
-    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        setTimeout(() => fetchRole(session.user.id), 0);
+    let active = true;
+
+    const hydrateSession = async (nextSession: Session | null) => {
+      if (!active) return;
+      setSession(nextSession);
+      setUser(nextSession?.user ?? null);
+
+      if (nextSession?.user) {
+        await fetchRole(nextSession.user.id);
         setTimeout(() => {
-          void saveOneSignalPlayerIdForUser(session.user.id);
+          void saveOneSignalPlayerIdForUser(nextSession.user!.id);
         }, 1200);
       } else {
         setRole(null);
       }
-      setLoading(false);
+
+      if (active) {
+        setLoading(false);
+      }
+    };
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, nextSession) => {
+      void hydrateSession(nextSession);
     });
 
     supabase.auth.getSession().then(async ({ data: { session }, error }) => {
       if (error && /refresh token/i.test(error.message)) {
         await handleStaleRefreshToken();
-        setLoading(false);
+        if (active) setLoading(false);
         return;
       }
-
-      setSession(session);
-      setUser(session?.user ?? null);
-      if (session?.user) {
-        fetchRole(session.user.id);
-        setTimeout(() => {
-          void saveOneSignalPlayerIdForUser(session.user.id);
-        }, 1200);
-      }
-      setLoading(false);
+      await hydrateSession(session ?? null);
     });
 
-    return () => subscription.unsubscribe();
+    return () => {
+      active = false;
+      subscription.unsubscribe();
+    };
   }, []);
 
   const signUp = async (email: string, password: string, name: string, role: string) => {
