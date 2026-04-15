@@ -23,39 +23,47 @@ const Login = () => {
   const { toast } = useToast();
   const navigate = useNavigate();
 
-  const routeSupabaseUserToDashboard = async () => {
-    const {
-      data: { user: authUser },
-    } = await supabase.auth.getUser();
+  const routeSupabaseUserToDashboard = async (userId?: string) => {
+    try {
+      let authUserId = userId;
+      if (!authUserId) {
+        const {
+          data: { user: authUser },
+        } = await supabase.auth.getUser();
+        authUserId = authUser?.id;
+      }
 
-    if (!authUser) {
-      navigate("/dashboard/seeker");
-      return;
+      if (!authUserId) {
+        window.location.assign(`${window.location.origin}/dashboard/seeker`);
+        return;
+      }
+
+      const { data: profileData, error: profileError } = await supabase
+        .from("profiles")
+        .select("is_blocked")
+        .eq("id", authUserId)
+        .maybeSingle();
+
+      if (!profileError && (profileData as { is_blocked?: boolean } | null)?.is_blocked) {
+        await signOut();
+        setFormMessage({ type: "error", text: "Your account has been blocked by admin." });
+        toast({ title: "Account blocked", description: "Please contact support.", variant: "destructive" });
+        return;
+      }
+
+      const { data: roleData } = await supabase
+        .from("user_roles")
+        .select("role")
+        .eq("user_id", authUserId)
+        .maybeSingle();
+
+      const userRole = roleData?.role ?? "seeker";
+      if (userRole === "admin") window.location.assign(`${window.location.origin}/dashboard/admin`);
+      else if (userRole === "provider") window.location.assign(`${window.location.origin}/dashboard/provider`);
+      else window.location.assign(`${window.location.origin}/dashboard/seeker`);
+    } catch {
+      window.location.assign(`${window.location.origin}/dashboard/seeker`);
     }
-
-    const { data: profileData } = await supabase
-      .from("profiles")
-      .select("is_blocked")
-      .eq("id", authUser.id)
-      .maybeSingle();
-
-    if ((profileData as { is_blocked?: boolean } | null)?.is_blocked) {
-      await signOut();
-      setFormMessage({ type: "error", text: "Your account has been blocked by admin." });
-      toast({ title: "Account blocked", description: "Please contact support.", variant: "destructive" });
-      return;
-    }
-
-    const { data: roleData } = await supabase
-      .from("user_roles")
-      .select("role")
-      .eq("user_id", authUser.id)
-      .maybeSingle();
-
-    const userRole = roleData?.role ?? "seeker";
-    if (userRole === "admin") navigate("/dashboard/admin");
-    else if (userRole === "provider") navigate("/dashboard/provider");
-    else navigate("/dashboard/seeker");
   };
 
   const handleEmailSignIn = async (e: React.FormEvent) => {
@@ -73,7 +81,7 @@ const Login = () => {
 
     setEmailLoading(true);
     try {
-      const { error } = await supabase.auth.signInWithPassword({
+      const { data, error } = await supabase.auth.signInWithPassword({
         email,
         password: emailPassword,
       });
@@ -86,7 +94,7 @@ const Login = () => {
 
       setFormMessage({ type: "success", text: "Signed in successfully." });
       toast({ title: "Welcome back!" });
-      await routeSupabaseUserToDashboard();
+      await routeSupabaseUserToDashboard(data?.user?.id ?? undefined);
     } finally {
       setEmailLoading(false);
     }
