@@ -918,7 +918,7 @@ const ProviderDashboard = () => {
                       }`}>{s.approval_status}</span>
                       {s.approval_status === "approved" && (
                         <button onClick={() => toggleService(s.id, s.is_active)} className="text-xs text-muted-foreground hover:text-foreground">
-                          {s.is_active ? <ToggleRight className="w-5 h-5 text-success" /> : <ToggleLeft className="w-5 h-5 text-muted-foreground" />}
+                          {s.is_active ? <ToggleRight className="w-5 h-5 text-success" /> : <ToggleLeft className="w-5 h-5 text-warning" />}
                         </button>
                       )}
                     </div>
